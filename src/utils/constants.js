@@ -162,6 +162,8 @@ export const UI_CONFIG = {
 
 export const API_CONFIG = {
   POSITION_ENDPOINT: "https://meshtasticback.taubetele.com/POSITION_APP",
-  DEVICE_METRICS_ENDPOINT: "https://meshtasticback.taubetele.com/TELEMETRY_APP",
+  TELEMETRY_ENDPOINT: "https://meshtasticback.taubetele.com/TELEMETRY_APP",
   NODEINFO_ENDPOINT: "https://meshtasticback.taubetele.com/NODEINFO_APP",
+  TEXT_MESSAGE_ENDPOINT:
+    "https://meshtasticback.taubetele.com/TEXT_MESSAGE_APP",
 };

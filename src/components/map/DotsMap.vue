@@ -130,6 +130,9 @@ const formatTime = (timestamp) => {
 
 const createBalloonContent = async (device, nodeId) => {
   let nodeInfoHtml = "";
+  let positionInfoHtml = "";
+  let telemetryInfoHtml = "";
+  let textMessagesHtml = "";
 
   try {
     const nodeInfo = await meshtasticApi.getNodeInfo(nodeId);
@@ -141,72 +144,364 @@ const createBalloonContent = async (device, nodeId) => {
       if (rawData) {
         nodeInfoHtml = `
 
-          <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #eee;">
-            <div style="font-weight: bold; margin-bottom: 4px;">Информация об узле:</div>
-            <div style="margin-top: 4px; font-size: 10px; color: #666;">
-              Последнее обновление: ${formatTime(latestInfo.timestamp)}
-            </div>
-            <div style="display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; font-size: 11px;">
-              ${
-                rawData.is_unmessagable
-                  ? `<span>Принимает сообщения:</span><span>${
-                      !rawData.is_unmessagable ? "Да" : "Нет"
-                    }</span>`
-                  : ""
-              }
-              ${
-                rawData.id
-                  ? `<span>ID:</span><span>${rawData.id} (${nodeId}) </span>`
-                  : ""
-              }
-              ${
-                rawData.hw_model
-                  ? `<span>Модель:</span><span>${
-                      HARDWARE_MODELS[rawData.hw_model]
-                    }</span>`
-                  : ""
-              }
-              ${
-                latestInfo.rxSnr !== undefined &&
-                latestInfo.rxRssi !== undefined
-                  ? latestInfo.rxSnr === 0 && latestInfo.rxRssi === 0
-                    ? `<span>Статус:</span><span>MQTT Connected</span>`
-                    : `<span>SNR:</span><span>${latestInfo.rxSnr} dB</span>
-                       <span>RSSI:</span><span>${latestInfo.rxRssi} dBm</span>`
-                  : ""
-              }
-              ${
-                latestInfo.hopLimit !== undefined
-                  ? `<span>Hop Limit:</span><span>${
-                      7 - latestInfo.hopLimit === 0
-                        ? "Direct"
-                        : 7 - latestInfo.hopLimit
-                    }</span>`
-                  : ""
-              }
-              ${
-                latestInfo.gatewayId
-                  ? `<span>Gateway:</span><span>${latestInfo.gatewayId}</span>`
-                  : ""
-              }
-            </div>
+    <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid #eee;">
+    <div style="font-weight: bold;">Информация об узле: ${formatTime(
+      latestInfo.timestamp
+    )}</div>
+    <div style="display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; font-size: 11px; line-height: 1.2;">
+    ${
+      rawData.is_unmessagable
+        ? `<span>Принимает сообщения:</span><span>${
+            !rawData.is_unmessagable ? "Да" : "Нет"
+          }</span>`
+        : ""
+    }
+    ${
+      rawData.id
+        ? `<span>ID:</span><span>${rawData.id} (${nodeId}) </span>`
+        : ""
+    }
+    ${
+      rawData.hw_model
+        ? `<span>Модель:</span><span>${
+            HARDWARE_MODELS[rawData.hw_model]
+          }</span>`
+        : ""
+    }
+    ${
+      latestInfo.rxSnr !== undefined && latestInfo.rxRssi !== undefined
+        ? latestInfo.rxSnr === 0 && latestInfo.rxRssi === 0
+          ? `<span>Данные:</span><span>Через MQTT</span>`
+          : `<span>SNR:</span><span>${latestInfo.rxSnr} dB</span>
+    <span>RSSI:</span><span>${latestInfo.rxRssi} dBm</span>`
+        : ""
+    }
+    ${
+      latestInfo.hopLimit !== undefined
+        ? `<span>Hop Limit:</span><span>${
+            7 - latestInfo.hopLimit === 0 ? "Direct" : 7 - latestInfo.hopLimit
+          }</span>`
+        : ""
+    }
+    ${
+      latestInfo.gatewayId
+        ? `<span>Gateway:</span><span>${latestInfo.gatewayId}</span>`
+        : ""
+    }
+    </div>
 
-          </div>
-        `;
+    </div>
+    `;
       }
     }
   } catch (error) {
     console.error("Ошибка загрузки информации об узле:", error);
   }
 
+  try {
+    const positionInfo = await meshtasticApi.getPositionInfo(nodeId);
+    if (positionInfo && positionInfo.data && positionInfo.data.length > 0) {
+      // Берем последнюю запись (самую свежую)
+      const latestPosition = positionInfo.data[0];
+
+      positionInfoHtml = `
+    <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid #eee;">
+    <div style="font-weight: bold; margin-bottom: 2px;">Данные о позиции: ${formatTime(
+      latestPosition.timestamp
+    )}</div>
+
+    <div style="display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; font-size: 11px; line-height: 1.2;">
+    ${
+      latestPosition.rawData.latitude_i !== undefined
+        ? `<span>Координаты:</span><span>${(
+            latestPosition.rawData.latitude_i / 10000000
+          ).toFixed(5)}, ${(
+            latestPosition.rawData.longitude_i / 10000000
+          ).toFixed(5)}</span>`
+        : ""
+    }
+    ${
+      latestPosition.rawData.altitude !== undefined
+        ? `<span>Высота:</span><span>${latestPosition.rawData.altitude} м</span>`
+        : ""
+    }
+    ${
+      latestPosition.rawData.sats_in_view !== undefined
+        ? `<span>Спутники:</span><span>${latestPosition.rawData.sats_in_view}</span>`
+        : ""
+    }
+    ${
+      latestPosition.rxSnr !== undefined && latestPosition.rxRssi !== undefined
+        ? latestPosition.rxSnr === 0 && latestPosition.rxRssi === 0
+          ? `<span>Данные:</span><span>Через MQTT</span>`
+          : `<span>SNR:</span><span>${latestPosition.rxSnr} dB</span>
+    <span>RSSI:</span><span>${latestPosition.rxRssi} dBm</span>`
+        : ""
+    }
+    ${
+      latestPosition.hopLimit !== undefined
+        ? `<span>Hop Limit:</span><span>${
+            7 - latestPosition.hopLimit === 0
+              ? "Direct"
+              : 7 - latestPosition.hopLimit
+          }</span>`
+        : ""
+    }
+    ${
+      latestPosition.gatewayId
+        ? `<span>Gateway:</span><span>${latestPosition.gatewayId}</span>`
+        : ""
+    }
+    </div>
+    </div>
+    `;
+    }
+  } catch (error) {
+    console.error("Ошибка загрузки информации о позиции:", error);
+  }
+
+  try {
+    const telemetryInfo = await meshtasticApi.getTelemetryInfo(nodeId);
+    if (telemetryInfo && telemetryInfo.data && telemetryInfo.data.length > 0) {
+      // Разделяем данные по типам
+      let deviceMetricsData = null;
+      let environmentMetricsData = null;
+      let latestDeviceMetrics = null;
+      let latestEnvironmentMetrics = null;
+
+      // Ищем последние данные каждого типа
+      for (const entry of telemetryInfo.data) {
+        if (
+          entry.rawData &&
+          entry.rawData.type === "deviceMetrics" &&
+          !latestDeviceMetrics
+        ) {
+          latestDeviceMetrics = entry;
+          deviceMetricsData =
+            entry.rawData.variant && entry.rawData.variant.value
+              ? entry.rawData.variant.value
+              : null;
+        }
+        if (
+          entry.rawData &&
+          entry.rawData.type === "environmentMetrics" &&
+          !latestEnvironmentMetrics
+        ) {
+          latestEnvironmentMetrics = entry;
+          environmentMetricsData =
+            entry.rawData.variant && entry.rawData.variant.value
+              ? entry.rawData.variant.value
+              : null;
+        }
+      }
+
+      // Формируем HTML для данных узла (deviceMetrics)
+      let deviceMetricsHtml = "";
+      if (latestDeviceMetrics && deviceMetricsData) {
+        deviceMetricsHtml = `
+    <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid #eee;">
+    <div style="font-weight: bold; margin-bottom: 2px;">Данные узла: ${formatTime(
+      latestDeviceMetrics.timestamp
+    )}</div>
+
+    <div style="display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; font-size: 11px; line-height: 1.2;">
+    ${
+      deviceMetricsData.battery_level !== undefined
+        ? `<span>Батарея:</span><span>${deviceMetricsData.battery_level}%</span>`
+        : ""
+    }
+    ${
+      deviceMetricsData.voltage !== undefined
+        ? `<span>Напряжение:</span><span>${deviceMetricsData.voltage.toFixed(
+            2
+          )} В</span>`
+        : ""
+    }
+    ${
+      deviceMetricsData.channel_utilization !== undefined
+        ? `<span>Загрузка канала:</span><span>${deviceMetricsData.channel_utilization.toFixed(
+            1
+          )}%</span>`
+        : ""
+    }
+    ${
+      deviceMetricsData.air_util_tx !== undefined
+        ? `<span>Эфир TX:</span><span>${deviceMetricsData.air_util_tx.toFixed(
+            1
+          )}%</span>`
+        : ""
+    }
+    ${
+      deviceMetricsData.uptime_seconds !== undefined
+        ? `<span>Время работы:</span><span>${Math.floor(
+            deviceMetricsData.uptime_seconds / 3600
+          )}ч ${Math.floor(
+            (deviceMetricsData.uptime_seconds % 3600) / 60
+          )}м</span>`
+        : ""
+    }
+    ${
+      latestDeviceMetrics.rxSnr !== undefined &&
+      latestDeviceMetrics.rxRssi !== undefined
+        ? latestDeviceMetrics.rxSnr === 0 && latestDeviceMetrics.rxRssi === 0
+          ? `<span>Данные:</span><span>Через MQTT</span>`
+          : `<span>SNR:</span><span>${latestDeviceMetrics.rxSnr} dB</span>
+    <span>RSSI:</span><span>${latestDeviceMetrics.rxRssi} dBm</span>`
+        : ""
+    }
+    ${
+      latestDeviceMetrics.hopLimit !== undefined
+        ? `<span>Hop Limit:</span><span>${
+            7 - latestDeviceMetrics.hopLimit === 0
+              ? "Direct"
+              : 7 - latestDeviceMetrics.hopLimit
+          }</span>`
+        : ""
+    }
+    ${
+      latestDeviceMetrics.gatewayId
+        ? `<span>Gateway:</span><span>${latestDeviceMetrics.gatewayId}</span>`
+        : ""
+    }
+    </div>
+    </div>
+    `;
+      }
+
+      // Формируем HTML для сенсоров (environmentMetrics)
+      let environmentMetricsHtml = "";
+      if (latestEnvironmentMetrics && environmentMetricsData) {
+        environmentMetricsHtml = `
+    <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid #eee;">
+    <div style="font-weight: bold; margin-bottom: 2px;">Сенсоры: ${formatTime(
+      latestEnvironmentMetrics.timestamp
+    )}</div>
+
+    <div style="display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; font-size: 11px; line-height: 1.2;">
+    ${
+      environmentMetricsData.temperature !== undefined
+        ? `<span>Температура:</span><span>${environmentMetricsData.temperature.toFixed(
+            1
+          )}°C</span>`
+        : ""
+    }
+    ${
+      environmentMetricsData.lux !== undefined
+        ? `<span>Освещенность:</span><span>${environmentMetricsData.lux} lux</span>`
+        : ""
+    }
+    ${
+      environmentMetricsData.humidity !== undefined
+        ? `<span>Влажность:</span><span>${environmentMetricsData.humidity.toFixed(
+            1
+          )}%</span>`
+        : ""
+    }
+    ${
+      environmentMetricsData.pressure !== undefined
+        ? `<span>Давление:</span><span>${environmentMetricsData.pressure.toFixed(
+            1
+          )} hPa</span>`
+        : ""
+    }
+    ${
+      latestEnvironmentMetrics.rxSnr !== undefined &&
+      latestEnvironmentMetrics.rxRssi !== undefined
+        ? latestEnvironmentMetrics.rxSnr === 0 &&
+          latestEnvironmentMetrics.rxRssi === 0
+          ? `<span>Данные:</span><span>Через MQTT</span>`
+          : `<span>SNR:</span><span>${latestEnvironmentMetrics.rxSnr} dB</span>
+    <span>RSSI:</span><span>${latestEnvironmentMetrics.rxRssi} dBm</span>`
+        : ""
+    }
+    ${
+      latestEnvironmentMetrics.hopLimit !== undefined
+        ? `<span>Hop Limit:</span><span>${
+            7 - latestEnvironmentMetrics.hopLimit === 0
+              ? "Direct"
+              : 7 - latestEnvironmentMetrics.hopLimit
+          }</span>`
+        : ""
+    }
+    ${
+      latestEnvironmentMetrics.gatewayId
+        ? `<span>Gateway:</span><span>${latestEnvironmentMetrics.gatewayId}</span>`
+        : ""
+    }
+    </div>
+    </div>
+    `;
+      }
+
+      telemetryInfoHtml = deviceMetricsHtml + environmentMetricsHtml;
+    }
+  } catch (error) {
+    console.error("Ошибка загрузки телеметрии:", error);
+  }
+
+  try {
+    const textMessages = await meshtasticApi.getTextMessages(nodeId);
+    if (textMessages && textMessages.data && textMessages.data.length > 0) {
+      // Берем последнее сообщение (самое свежее)
+      const latestMessage = textMessages.data[0];
+      const rawData = latestMessage.rawData;
+
+      if (rawData && rawData.text) {
+        textMessagesHtml = `
+    <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid #eee;">
+    <div style="font-weight: bold; margin-bottom: 2px;">Последнее сообщение: ${formatTime(
+      latestMessage.timestamp
+    )}</div>
+
+    <div style="display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; font-size: 11px; line-height: 1.2;">
+    <span>Текст:</span><span style="word-break: break-word;">${
+      rawData.text
+    }</span>
+    ${
+      latestMessage.to !== undefined
+        ? `<span>Кому:</span><span>${
+            latestMessage.to === 4294967295 ? "Всем" : latestMessage.to
+          }</span>`
+        : ""
+    }
+    ${
+      latestMessage.rxSnr !== undefined && latestMessage.rxRssi !== undefined
+        ? latestMessage.rxSnr === 0 && latestMessage.rxRssi === 0
+          ? `<span>Данные:</span><span>Через MQTT</span>`
+          : `<span>SNR:</span><span>${latestMessage.rxSnr} dB</span>
+    <span>RSSI:</span><span>${latestMessage.rxRssi} dBm</span>`
+        : ""
+    }
+    ${
+      latestMessage.hopLimit !== undefined
+        ? `<span>Hop Limit:</span><span>${
+            7 - latestMessage.hopLimit === 0
+              ? "Direct"
+              : 7 - latestMessage.hopLimit
+          }</span>`
+        : ""
+    }
+    ${
+      latestMessage.gatewayId
+        ? `<span>Gateway:</span><span>${latestMessage.gatewayId}</span>`
+        : ""
+    }
+    </div>
+    </div>
+    `;
+      }
+    }
+  } catch (error) {
+    console.error("Ошибка загрузки текстовых сообщений:", error);
+  }
+
   return `
     <div style="max-width: 350px; font-size: 12px;">
-      <div style="display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; font-family: monospace;">
-        <strong>Координаты:</strong> <span>${
-          device.latitude?.toFixed(6) || "N/A"
-        }, ${device.longitude?.toFixed(6) || "N/A"}</span>
-      </div>
-      ${nodeInfoHtml}
+
+    ${nodeInfoHtml}
+    ${positionInfoHtml}
+    ${telemetryInfoHtml}
+    ${textMessagesHtml}
     </div>
   `;
 };
@@ -280,14 +575,10 @@ const renderBallons = (devices, isUpdate = false) => {
           iconContent: device.shortName,
           balloonContentHeader: device.longName + " (" + device.shortName + ")",
           balloonContentBody: `
-      <div style="max-width: 350px; font-size: 12px;">
-        <div style="display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; font-family: monospace;">
-          <strong>Координаты:</strong> <span>${
-            device.latitude?.toFixed(6) || "N/A"
-          }, ${device.longitude?.toFixed(6) || "N/A"}</span>
-        </div>
-        <div style="margin-top: 8px; color: #666;">🔄 Загрузка информации об узле...</div>
-      </div>
+    <div style="max-width: 350px; font-size: 12px;">
+
+    <div style="margin-top: 8px; color: #666;">🔄 Загрузка информации об узле...</div>
+    </div>
     `,
           balloonContentFooter: `Updated: ${timestampfooter}`,
           clusterCaption: `Node: <strong>${
@@ -313,15 +604,10 @@ const renderBallons = (devices, isUpdate = false) => {
           placemark.properties.set(
             "balloonContentBody",
             `
-        <div style="max-width: 350px; font-size: 12px;">
-          <div style="display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; font-family: monospace;">
-            <strong>Координаты:</strong> <span>${
-              device.latitude?.toFixed(6) || "N/A"
-            }, ${device.longitude?.toFixed(6) || "N/A"}</span>
-          </div>
-          <div style="margin-top: 8px; color: #f44336;">❌ Ошибка загрузки данных</div>
-        </div>
-      `
+    <div style="max-width: 350px; font-size: 12px;">
+    <div style="margin-top: 8px; color: #f44336;">❌ Ошибка загрузки данных</div>
+    </div>
+    `
           );
         }
       });

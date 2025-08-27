@@ -400,8 +400,8 @@ const updateDevicesData = async () => {
       emit("devicesCount", count);
 
       // Рендерим балуны с флагом обновления
-      if (typeof renderBallons === "function") {
-        renderBallons(devices.value, true);
+      if (typeof debouncedRenderBallons === "function") {
+        debouncedRenderBallons(devices.value, true);
       } else {
         console.warn("⚠️ renderBallons не определена при обновлении");
       }
@@ -863,13 +863,13 @@ onMounted(async () => {
     await fetchDevicesData();
 
     // Рендерим маркеры после загрузки данных
-    renderBallons(devices?.value);
+    debouncedRenderBallons(devices?.value);
 
     watch(devices, (newDevices) => {
       // следит за обновлениями данных
       map.geoObjects?.removeAll();
       renderSelfBallon();
-      renderBallons(newDevices);
+      debouncedRenderBallons(newDevices);
       renderPath(openedNodeId);
     });
 

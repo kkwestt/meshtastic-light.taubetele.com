@@ -17,7 +17,12 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted, watch } from "vue";
-import { MAP_CONFIG, MAP_PRESETS, UI_CONFIG } from "../../utils/constants.js";
+import {
+  MAP_CONFIG,
+  MAP_PRESETS,
+  UI_CONFIG,
+  HARDWARE_MODELS,
+} from "../../utils/constants.js";
 import { debounce, isPointInBounds } from "../../utils/helpers.js";
 import { meshtasticApi } from "../../utils/api.js";
 
@@ -123,14 +128,81 @@ const formatTime = (timestamp) => {
   }
 };
 
-const createBalloonContent = (device) => {
+const createBalloonContent = async (device, nodeId) => {
+  let nodeInfoHtml = "";
+
+  try {
+    const nodeInfo = await meshtasticApi.getNodeInfo(nodeId);
+    if (nodeInfo && nodeInfo.data && nodeInfo.data.length > 0) {
+      // Берем последнюю запись (самую свежую)
+      const latestInfo = nodeInfo.data[0];
+      const rawData = latestInfo.rawData;
+
+      if (rawData) {
+        nodeInfoHtml = `
+          <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #eee;">
+            <div style="font-weight: bold; margin-bottom: 4px;">Информация об узле:</div>
+            <div style="display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; font-size: 11px;">
+              ${
+                rawData.long_name
+                  ? `<span>Полное имя:</span><span>${rawData.long_name}</span>`
+                  : ""
+              }
+              ${
+                rawData.short_name
+                  ? `<span>Короткое имя:</span><span>${rawData.short_name}</span>`
+                  : ""
+              }
+              ${
+                rawData.macaddr
+                  ? `<span>MAC:</span><span>${rawData.macaddr}</span>`
+                  : ""
+              }
+              ${
+                rawData.hw_model
+                  ? `<span>Модель:</span><span>HW_${rawData.hw_model}</span>`
+                  : ""
+              }
+              ${
+                latestInfo.rxSnr !== undefined
+                  ? `<span>SNR:</span><span>${latestInfo.rxSnr} dB</span>`
+                  : ""
+              }
+              ${
+                latestInfo.rxRssi !== undefined
+                  ? `<span>RSSI:</span><span>${latestInfo.rxRssi} dBm</span>`
+                  : ""
+              }
+              ${
+                latestInfo.hopLimit !== undefined
+                  ? `<span>Hop Limit:</span><span>${latestInfo.hopLimit}</span>`
+                  : ""
+              }
+              ${
+                latestInfo.gatewayId
+                  ? `<span>Gateway:</span><span>${latestInfo.gatewayId}</span>`
+                  : ""
+              }
+            </div>
+            <div style="margin-top: 4px; font-size: 10px; color: #666;">
+              Последнее обновление: ${formatTime(latestInfo.timestamp)}
+            </div>
+          </div>
+        `;
+      }
+    }
+  } catch (error) {
+    console.error("Ошибка загрузки информации об узле:", error);
+  }
+
   return `
-    <div style="max-width: 300px; font-size: 12px;">
-      <div style="display: grid; grid-template-columns: auto 0.5fr; font-family: monospace; align-items: baseline;">
+    <div style="max-width: 350px; font-size: 12px;">
+      <div style="display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; font-family: monospace;">
         <strong>Координаты:</strong> <span>${
           device.latitude?.toFixed(6) || "N/A"
         }, ${device.longitude?.toFixed(6) || "N/A"}</span>
       </div>
+      ${nodeInfoHtml}
     </div>
   `;
 };
@@ -203,7 +275,16 @@ const renderBallons = (devices, isUpdate = false) => {
         {
           iconContent: device.shortName,
           balloonContentHeader: device.longName + " (" + device.shortName + ")",
-          balloonContentBody: createBalloonContent(device),
+          balloonContentBody: `
+      <div style="max-width: 350px; font-size: 12px;">
+        <div style="display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; font-family: monospace;">
+          <strong>Координаты:</strong> <span>${
+            device.latitude?.toFixed(6) || "N/A"
+          }, ${device.longitude?.toFixed(6) || "N/A"}</span>
+        </div>
+        <div style="margin-top: 8px; color: #666;">🔄 Загрузка информации об узле...</div>
+      </div>
+    `,
           balloonContentFooter: `Updated: ${timestampfooter}`,
           clusterCaption: `Node: <strong>${
             device.shortName || device.short_name || nodeId
@@ -213,11 +294,32 @@ const renderBallons = (devices, isUpdate = false) => {
         { preset: `${presetcolor}` }
       );
 
-      placemark.events.add("balloonopen", (event) => {
+      placemark.events.add("balloonopen", async (event) => {
         const nodeId =
           event.originalEvent.currentTarget.properties._data.nodeId;
         openedNodeId = nodeId;
         renderPath(openedNodeId);
+
+        // Загружаем полное содержимое баллуна
+        try {
+          const fullContent = await createBalloonContent(device, nodeId);
+          placemark.properties.set("balloonContentBody", fullContent);
+        } catch (error) {
+          console.error("Ошибка загрузки содержимого баллуна:", error);
+          placemark.properties.set(
+            "balloonContentBody",
+            `
+        <div style="max-width: 350px; font-size: 12px;">
+          <div style="display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; font-family: monospace;">
+            <strong>Координаты:</strong> <span>${
+              device.latitude?.toFixed(6) || "N/A"
+            }, ${device.longitude?.toFixed(6) || "N/A"}</span>
+          </div>
+          <div style="margin-top: 8px; color: #f44336;">❌ Ошибка загрузки данных</div>
+        </div>
+      `
+          );
+        }
       });
 
       placemarks.push(placemark);

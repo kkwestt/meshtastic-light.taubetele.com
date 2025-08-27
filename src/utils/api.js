@@ -3,7 +3,7 @@ import { API_CONFIG } from "./constants.js";
 export const meshtasticApi = {
   async getGpsTrack(nodeId) {
     try {
-      const response = await fetch(`${API_CONFIG.GPS_ENDPOINT}:${nodeId}`);
+      const response = await fetch(`${API_CONFIG.POSITION_ENDPOINT}:${nodeId}`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -27,6 +27,20 @@ export const meshtasticApi = {
       return data;
     } catch (error) {
       console.error("Ошибка получения метрик устройства:", error);
+      return null;
+    }
+  },
+
+  async getNodeInfo(nodeId) {
+    try {
+      const response = await fetch(`${API_CONFIG.NODEINFO_ENDPOINT}:${nodeId}`);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error("Ошибка получения информации о узле:", error);
       return null;
     }
   },

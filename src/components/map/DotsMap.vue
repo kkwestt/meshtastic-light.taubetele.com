@@ -22,6 +22,8 @@ import {
   MAP_PRESETS,
   UI_CONFIG,
   HARDWARE_MODELS,
+  DEVICE_ROLES,
+  REGIONS,
 } from "../../utils/constants.js";
 import { debounce, isPointInBounds } from "../../utils/helpers.js";
 import { meshtasticApi } from "../../utils/api.js";
@@ -133,6 +135,7 @@ const createBalloonContent = async (device, nodeId) => {
   let positionInfoHtml = "";
   let telemetryInfoHtml = "";
   let textMessagesHtml = "";
+  let mapReportHtml = "";
 
   try {
     const nodeInfo = await meshtasticApi.getNodeInfo(nodeId);
@@ -457,6 +460,7 @@ const createBalloonContent = async (device, nodeId) => {
     <span>Текст:</span><span style="word-break: break-word;">${
       rawData.text
     }</span>
+
     ${
       latestMessage.to !== undefined
         ? `<span>Кому:</span><span>${
@@ -495,6 +499,85 @@ const createBalloonContent = async (device, nodeId) => {
     console.error("Ошибка загрузки текстовых сообщений:", error);
   }
 
+  try {
+    const mapReportInfo = await meshtasticApi.getMapReportInfo(nodeId);
+    if (mapReportInfo && mapReportInfo.data && mapReportInfo.data.length > 0) {
+      // Берем последний отчет (самый свежий)
+      const latestReport = mapReportInfo.data[0];
+      const rawData = latestReport.rawData;
+
+      if (rawData) {
+        mapReportHtml = `
+    <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid #eee;">
+    <div style="font-weight: bold; margin-bottom: 2px;">Отчет карты: ${formatTime(
+      latestReport.timestamp
+    )}</div>
+
+    <div style="display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; font-size: 11px; line-height: 1.2;">
+    ${
+      rawData.decoded.role !== undefined
+        ? `<span>Роль:</span><span>${DEVICE_ROLES[rawData.decoded.role]}</span>`
+        : ""
+    }
+    ${
+      rawData.decoded.hw_model !== undefined
+        ? `<span>Модель:</span><span>${
+            HARDWARE_MODELS[rawData.decoded.hw_model]
+          }</span>`
+        : ""
+    }
+    ${
+      rawData.decoded.firmware_version
+        ? `<span>Прошивка:</span><span>${rawData.decoded.firmware_version}</span>`
+        : ""
+    }
+         ${
+           rawData.decoded.region !== undefined
+             ? `<span>Регион:</span><span>${
+                 REGIONS[rawData.decoded.region] || rawData.decoded.region
+               }</span>`
+             : ""
+         }
+    ${
+      rawData.decoded.modem_preset !== undefined
+        ? `<span>Пресет модема:</span><span>${rawData.decoded.modem_preset}</span>`
+        : ""
+    }
+    ${
+      rawData.decoded.has_default_channel !== undefined
+        ? `<span>Канал по умолчанию:</span><span>${
+            rawData.decoded.has_default_channel ? "Да" : "Нет"
+          }</span>`
+        : ""
+    }
+        ${
+          rawData.decoded.numOnlineLocalNodes !== undefined
+            ? `<span>Рядом других устройств:</span><span>${rawData.decoded.numOnlineLocalNodes}</span>`
+            : ""
+        }
+    ${
+      latestReport.rxSnr !== undefined && latestReport.rxRssi !== undefined
+        ? latestReport.rxSnr === 0 && latestReport.rxRssi === 0
+          ? `<span>Данные:</span><span>Через MQTT</span>`
+          : `<span>SNR:</span><span>${latestReport.rxSnr} dB</span>
+    <span>RSSI:</span><span>${latestReport.rxRssi} dBm</span>`
+        : ""
+    }
+
+    ${
+      latestReport.gatewayId
+        ? `<span>Gateway:</span><span>${latestReport.gatewayId}</span>`
+        : ""
+    }
+    </div>
+    </div>
+    `;
+      }
+    }
+  } catch (error) {
+    console.error("Ошибка загрузки отчета карты:", error);
+  }
+
   return `
     <div style="max-width: 350px; font-size: 12px;">
 
@@ -502,6 +585,7 @@ const createBalloonContent = async (device, nodeId) => {
     ${positionInfoHtml}
     ${telemetryInfoHtml}
     ${textMessagesHtml}
+    ${mapReportHtml}
     </div>
   `;
 };
@@ -884,7 +968,7 @@ onMounted(async () => {
   0% {
     opacity: 1;
   }
-  50% {
+  40% {
     opacity: 0.5;
   }
   100% {

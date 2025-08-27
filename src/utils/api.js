@@ -91,4 +91,21 @@ export const meshtasticApi = {
       return null;
     }
   },
+
+  // Добавляю новый метод для получения данных MAP_REPORT_APP
+  async getMapReportInfo(nodeId) {
+    try {
+      const response = await fetch(
+        `${API_CONFIG.MAP_REPORT_ENDPOINT}:${nodeId}`
+      );
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error("Ошибка получения данных карты:", error);
+      return null;
+    }
+  },
 };

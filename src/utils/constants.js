@@ -150,6 +150,24 @@ export const HARDWARE_MODELS = {
   255: "PRIVATE HW",
 };
 
+export const REGIONS = {
+  0: "UNSET",
+  1: "US",
+  2: "EU_433",
+  3: "EU_868",
+  4: "CN",
+  5: "JP",
+  6: "ANZ",
+  7: "KR",
+  8: "TW",
+  9: "RU",
+  10: "IN",
+  11: "IL_865",
+  12: "NZ_865",
+  13: "TH",
+  14: "LORA_24",
+};
+
 export const TIME_INTERVALS = {
   MESSAGE_VISIBILITY_THRESHOLD: 300,
   DEVICE_ACTIVE_THRESHOLD: 6 * 60 * 60,
@@ -166,4 +184,5 @@ export const API_CONFIG = {
   NODEINFO_ENDPOINT: "https://meshtasticback.taubetele.com/NODEINFO_APP",
   TEXT_MESSAGE_ENDPOINT:
     "https://meshtasticback.taubetele.com/TEXT_MESSAGE_APP",
+  MAP_REPORT_ENDPOINT: "https://meshtasticback.taubetele.com/MAP_REPORT_APP",
 };

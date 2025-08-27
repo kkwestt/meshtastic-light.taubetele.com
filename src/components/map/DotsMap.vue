@@ -42,9 +42,6 @@ import {
   isDeviceRecentlyActive,
   isMqttNode,
   getNodeId,
-  getDeviceName,
-  getDeviceCoordinates,
-  getBatteryLevel,
   formatValue,
   isPointInBounds,
   debounce,
@@ -99,13 +96,8 @@ const devices = ref({});
 
 // Создаем debounced версию renderBallons с задержкой 1 секунда
 const debouncedRenderBallons = debounce((devices, isUpdate) => {
-  console.log(
-    `⏱️ debouncedRenderBallons вызвана с ${
-      Object.keys(devices).length
-    } устройствами, обновление: ${isUpdate}`
-  );
   renderBallons(devices, isUpdate);
-}, 1000);
+}, 2000);
 
 // timeAgo теперь импортируется из utils/helpers.js
 
@@ -165,28 +157,11 @@ const formatTime = (timestamp) => {
 };
 
 // Функция для получения имени шлюза
-const getGatewayName = (gatewayId) => {
-  if (!gatewayId || !devices.value) return "";
-
-  // Ищем устройство с таким gateway ID
-  for (const deviceId in devices.value) {
-    const device = devices.value[deviceId];
-    if (device.hex_id === gatewayId || device.device_id === gatewayId) {
-      return device.long_name ? ` (${device.long_name})` : "";
-    }
-  }
-  return "";
-};
 
 // Функция для создания содержимого балуна
 const createBalloonContent = (device) => {
   return `
     <div style="max-width: 300px; font-size: 12px;">
-      <h4 style="margin: 0 0 10px 0; color: #333;">${formatValue(
-        device.longName || device.shortName,
-        ""
-      )}</h4>
-
       <div style="display: grid; grid-template-columns: auto 0.5fr; font-family: monospace; align-items: baseline;">
         <strong>Координаты:</strong> <span>${formatValue(
           device.latitude?.toFixed(6)
@@ -196,14 +171,35 @@ const createBalloonContent = (device) => {
   `;
 };
 
+// Функция для отображения пути устройства
+const renderPath = async (nodeId) => {
+  if (!nodeId) return;
+
+  try {
+    const gpsData = await meshtasticApi.getGpsTrack(nodeId);
+
+    if (!gpsData || !gpsData.length) return;
+
+    const polyline = new ymaps.Polyline(
+      gpsData.map(({ latitudeI, longitudeI }) => [
+        latitudeI / 10000000,
+        longitudeI / 10000000,
+      ]),
+      {},
+      {
+        strokeColor: MAP_CONFIG.PATH_STROKE_COLOR,
+        strokeWidth: MAP_CONFIG.PATH_STROKE_WIDTH,
+      }
+    );
+
+    map.geoObjects.add(polyline);
+  } catch (error) {
+    console.error("Ошибка отображения пути:", error);
+  }
+};
+
 // Функция для рендеринга балунов на карте
 const renderBallons = (devices, isUpdate = false) => {
-  console.log(
-    `🎨 renderBallons вызвана с ${
-      Object.keys(devices).length
-    } устройствами, обновление: ${isUpdate}`
-  );
-
   try {
     const renderStartTime = performance.now();
 
@@ -220,7 +216,8 @@ const renderBallons = (devices, isUpdate = false) => {
     let skippedTime = 0;
     let skippedBounds = 0;
 
-    console.log("🔄 Начинаем цикл обработки устройств");
+    // Получаем текущее время для расчета разницы
+    const now = Date.now();
 
     for (const index in devices) {
       const device = devices[index];
@@ -228,15 +225,11 @@ const renderBallons = (devices, isUpdate = false) => {
       const nodeId = index;
       const coordinates = [device.latitude, device.longitude, 0];
 
-      console.log(`🔍 Обрабатываем устройство ${index}:`, device);
-
       if (!coordinates || !device.latitude || !device.longitude) {
         skippedCoordinates++;
         continue;
       }
 
-      // Фильтруем устройства по времени - показываем только те, что были активны в последние 24 часа
-      const now = Date.now();
       const deviceTime = device.s_time;
       const timeDiffHours = (now - deviceTime) / (1000 * 60 * 60);
 
@@ -246,10 +239,10 @@ const renderBallons = (devices, isUpdate = false) => {
       }
 
       const [latitude, longitude, altitude] = coordinates;
-      const name = device.shortName || device.longName || "";
 
       // Проверяем, находится ли точка в видимой области карты
       const bounds = map.getBounds();
+
       if (!isPointInBounds(latitude, longitude, bounds)) {
         skippedBounds++;
         continue;
@@ -271,13 +264,12 @@ const renderBallons = (devices, isUpdate = false) => {
       const placemark = new window.ymaps.Placemark(
         [latitude, longitude],
         {
-          iconContent: name,
-          balloonContentHeader: formatValue(
-            device.longName || device.shortName
-          ),
+          iconContent: device.shortName || "",
+          balloonContentHeader:
+            device.longName + "(" + device.shortName + ")" || "",
           balloonContentBody: createBalloonContent(device),
           balloonContentFooter: `Updated: ${timestampfooter}`,
-          clusterCaption: `Node: <strong>${name}</strong>`,
+          clusterCaption: `Node: <strong>${nodeId}</strong>`,
           nodeId,
         },
         { preset: `${presetcolor}` }
@@ -289,10 +281,12 @@ const renderBallons = (devices, isUpdate = false) => {
       placemark.events.add("balloonopen", (event) => {
         const nodeId = getPlacemarkNodeId(event);
         openedNodeId = nodeId;
+        console.log("!!! balloonopen", nodeId);
         renderPath(openedNodeId);
       });
 
       placemarks.push(placemark);
+      processedCount++;
     }
 
     if (state.zoom > MAP_CONFIG.MIN_ZOOM_FOR_INDIVIDUAL_MARKERS) {
@@ -333,16 +327,14 @@ const renderBallons = (devices, isUpdate = false) => {
     const renderEndTime = performance.now();
     const renderTime = ((renderEndTime - renderStartTime) / 1000).toFixed(2);
 
-    // Временно добавляем статистику для проверки
-    console.log(`📊 Статистика рендеринга:`);
-    console.log(`   - Всего устройств: ${Object.keys(devices).length}`);
-    console.log(`   - Пропущено (старые): ${skippedTime}`);
-    console.log(`   - Пропущено (вне карты): ${skippedBounds}`);
-    console.log(`   - Отрисовано: ${placemarks.length}`);
-    console.log(`   - Время рендеринга: ${renderTime} сек`);
+    // Минимальная статистика
+    console.log(
+      `📊 Рендеринг: ${processedCount}/${
+        Object.keys(devices).length
+      } точек за ${renderTime}с`
+    );
   } catch (error) {
     console.error("❌ Ошибка в renderBallons:", error);
-    console.error("❌ Stack trace:", error.stack);
   }
 };
 
@@ -353,9 +345,6 @@ const fetchDevicesData = async () => {
   try {
     const response = await fetch("https://meshtasticback.taubetele.com/dots");
     const data = await response.json();
-
-    console.log("📥 Получены данные:", data);
-    console.log("🔍 Структура данных:", Object.keys(data));
 
     if (data && data.data) {
       devices.value = data.data;
@@ -509,15 +498,29 @@ onMounted(async () => {
     const placemarks = [];
     var state = map.action.getCurrentState();
 
+    // Логируем состояние карты
+    console.log(`🗺️ Состояние карты:`, {
+      zoom: state.zoom,
+      center: map.getCenter(),
+      bounds: map.getBounds(),
+    });
+
+    let processedCount = 0;
+    let skippedCoordinates = 0;
+    let skippedTime = 0;
+    let skippedBounds = 0;
+
+    // Получаем текущее время для расчета разницы
+    const now = Date.now();
+
     for (const index in devices) {
       const device = devices[index];
       const nodeId = getNodeId(device);
-      const coordinates = getDeviceCoordinates(device);
+      const coordinates = [device.latitude, device.longitude, 0];
 
       if (!coordinates) continue;
 
       // Фильтруем устройства по времени - показываем только те, что были активны в последние 24 часа
-      const now = Date.now();
       const deviceTime = device.s_time;
       const timeDiffHours = (now - deviceTime) / (1000 * 60 * 60);
 
@@ -527,7 +530,12 @@ onMounted(async () => {
       }
 
       const [latitude, longitude, altitude] = coordinates;
-      const name = getDeviceName(device);
+      const name =
+        device.shortName ||
+        device.longName ||
+        device.short_name ||
+        device.long_name ||
+        "";
       // Временно отключаем проверку границ для отладки
       // const bounds = map.getBounds();
       // if (!isPointInBounds(latitude, longitude, bounds)) continue;
@@ -738,14 +746,16 @@ onMounted(async () => {
       const placemark = new window.ymaps.Placemark(
         [latitude, longitude],
         {
-          iconContent: name,
-          balloonContentHeader: formatValue(
-            device.longName || device.shortName,
-            ""
-          ),
+          iconContent: device.shortName || device.short_name || nodeId,
+          balloonContentHeader:
+            device.shortName ||
+            device.longName ||
+            device.short_name ||
+            device.long_name ||
+            `Устройство ${nodeId}`,
           balloonContentBody: createBalloonContent(device),
           balloonContentFooter: `Updated: ${timestampfooter}`,
-          clusterCaption: `Node: <strong>${name}</strong>`,
+          clusterCaption: `Node: <strong>${nodeId}</strong>`,
           nodeId,
         },
         { preset: `${presetcolor}` }
@@ -757,14 +767,9 @@ onMounted(async () => {
       placemark.events.add("balloonopen", (event) => {
         const nodeId = getPlacemarkNodeId(event);
         openedNodeId = nodeId;
+        console.log("!!! balloonopen", nodeId);
         renderPath(openedNodeId);
-        console.log("!!! balloonopen", openedNodeId);
       });
-
-      // placemark.events.add("balloonclose", (event) => {
-      //   const nodeId = getPlacemarkNodeId(event);
-      //   console.log("!!! event:balloonclose", event, nodeId);
-      // });
 
       placemarks.push(placemark);
     }
@@ -778,7 +783,7 @@ onMounted(async () => {
           const geometryObject = map.geoObjects.get(length - 1);
 
           geometryObject.balloon.events.add("beforeuserclose", () => {
-            console.log("!!! beforeuserclose", openedNodeId);
+            console.log(`🎈 Балун закрыт для устройства ID: ${openedNodeId}`);
             openedNodeId = null;
           });
 
@@ -814,32 +819,6 @@ onMounted(async () => {
     // if (window.openedNodeId && window.openedNodeId === nodeId) {
     // placemark.o
     // }
-  };
-
-  const renderPath = async (nodeId) => {
-    if (!nodeId) return;
-
-    try {
-      const gpsData = await meshtasticApi.getGpsTrack(nodeId);
-
-      if (!gpsData || !gpsData.length) return;
-
-      const polyline = new ymaps.Polyline(
-        gpsData.map(({ latitudeI, longitudeI }) => [
-          latitudeI / 10000000,
-          longitudeI / 10000000,
-        ]),
-        {},
-        {
-          strokeColor: MAP_CONFIG.PATH_STROKE_COLOR,
-          strokeWidth: MAP_CONFIG.PATH_STROKE_WIDTH,
-        }
-      );
-
-      map.geoObjects.add(polyline);
-    } catch (error) {
-      console.error("Ошибка отображения пути:", error);
-    }
   };
 
   const initYMap = () => {
@@ -976,22 +955,20 @@ const filtered = computed(() => {
       // )
       if (devices.value[candidate].server.match(needle)) {
         candidates[candidate] = devices.value[candidate];
-      } else if (
-        devices.value[candidate]?.user?.data?.shortName
-          .toLowerCase()
-          .match(needle)
-      ) {
-        candidates[candidate] = devices.value[candidate];
-      } else if (
-        devices.value[candidate]?.user?.data?.longName
-          .toLowerCase()
-          .match(needle)
-      ) {
-        candidates[candidate] = devices.value[candidate];
-      } else if (
-        devices.value[candidate]?.user?.data?.id.toLowerCase().match(needle)
-      ) {
-        candidates[candidate] = devices.value[candidate];
+      } else {
+        const displayName =
+          devices.value[candidate]?.shortName ||
+          devices.value[candidate]?.longName ||
+          devices.value[candidate]?.short_name ||
+          devices.value[candidate]?.long_name ||
+          "";
+        if (displayName && displayName.toLowerCase().match(needle)) {
+          candidates[candidate] = devices.value[candidate];
+        } else if (
+          devices.value[candidate]?.user?.data?.id?.toLowerCase().match(needle)
+        ) {
+          candidates[candidate] = devices.value[candidate];
+        }
       }
     }
     return Object.keys(candidates);

@@ -147,22 +147,9 @@ export function getDeviceCoordinates(device) {
 }
 
 /**
- * Получает уровень батареи
- */
-export function getBatteryLevel(device) {
-  // Новая структура данных
-  if (device?.battery_level !== undefined) {
-    return device.battery_level;
-  }
-
-  // Старая структура данных
-  return device?.deviceMetrics?.data?.deviceMetrics?.batteryLevel || null;
-}
-
-/**
  * Форматирует значение с резервным текстом
  */
-export function formatValue(value, defaultText = "N/A") {
+export function formatValue(value, defaultText = "") {
   if (
     value === undefined ||
     value === null ||
@@ -194,13 +181,30 @@ export function formatValue(value, defaultText = "N/A") {
  * Проверяет, находится ли точка в заданных границах
  */
 export function isPointInBounds(lat, lng, bounds) {
-  if (!bounds || bounds.length !== 2) return true;
+  // Если границы не определены, считаем что точка в границах
+  if (!bounds) return true;
 
-  const [[southWest], [northEast]] = bounds;
-  const west = bounds[0][1];
-  const east = bounds[1][1];
+  // Для Yandex Maps bounds - это объект с методами getSouthWest() и getNorthEast()
+  if (bounds.getSouthWest && bounds.getNorthEast) {
+    const sw = bounds.getSouthWest();
+    const ne = bounds.getNorthEast();
 
-  return lat >= southWest && lat <= northEast && lng >= west && lng <= east;
+    if (sw && ne) {
+      return lat >= sw[0] && lat <= ne[0] && lng >= sw[1] && lng <= ne[1];
+    }
+  }
+
+  // Для массива границ (старый формат)
+  if (Array.isArray(bounds) && bounds.length === 2) {
+    const [[southWest], [northEast]] = bounds;
+    const west = bounds[0][1];
+    const east = bounds[1][1];
+
+    return lat >= southWest && lat <= northEast && lng >= west && lng <= east;
+  }
+
+  // Если формат границ неизвестен, считаем что точка в границах
+  return true;
 }
 
 /**

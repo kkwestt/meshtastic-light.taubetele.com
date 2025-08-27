@@ -1,0 +1,9 @@
+node_modules
+.DS_Store
+.trunk
+config.mjs
+src/servers.js
+node_module
+.DS_Store
+.trunk
+meshtastic.taubetele.com

@@ -1,0 +1,12 @@
+version: "3.8"
+
+services:
+  frontend:
+    build: .
+    ports:
+      - "83:80"
+    restart: unless-stopped
+    container_name: meshtastic_light_taubetele_com_83
+    environment:
+      - NODE_ENV=production
+    network_mode: bridge

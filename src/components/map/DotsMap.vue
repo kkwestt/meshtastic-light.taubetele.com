@@ -99,6 +99,11 @@ const devices = ref({});
 
 // Создаем debounced версию renderBallons с задержкой 1 секунда
 const debouncedRenderBallons = debounce((devices, isUpdate) => {
+  console.log(
+    `⏱️ debouncedRenderBallons вызвана с ${
+      Object.keys(devices).length
+    } устройствами, обновление: ${isUpdate}`
+  );
   renderBallons(devices, isUpdate);
 }, 1000);
 
@@ -193,6 +198,12 @@ const createBalloonContent = (device) => {
 
 // Функция для рендеринга балунов на карте
 const renderBallons = (devices, isUpdate = false) => {
+  console.log(
+    `🎨 renderBallons вызвана с ${
+      Object.keys(devices).length
+    } устройствами, обновление: ${isUpdate}`
+  );
+
   try {
     const renderStartTime = performance.now();
 
@@ -209,11 +220,15 @@ const renderBallons = (devices, isUpdate = false) => {
     let skippedTime = 0;
     let skippedBounds = 0;
 
+    console.log("🔄 Начинаем цикл обработки устройств");
+
     for (const index in devices) {
       const device = devices[index];
       // Новая структура данных - используем index как ID
       const nodeId = index;
       const coordinates = [device.latitude, device.longitude, 0];
+
+      console.log(`🔍 Обрабатываем устройство ${index}:`, device);
 
       if (!coordinates || !device.latitude || !device.longitude) {
         skippedCoordinates++;
@@ -317,6 +332,14 @@ const renderBallons = (devices, isUpdate = false) => {
 
     const renderEndTime = performance.now();
     const renderTime = ((renderEndTime - renderStartTime) / 1000).toFixed(2);
+
+    // Временно добавляем статистику для проверки
+    console.log(`📊 Статистика рендеринга:`);
+    console.log(`   - Всего устройств: ${Object.keys(devices).length}`);
+    console.log(`   - Пропущено (старые): ${skippedTime}`);
+    console.log(`   - Пропущено (вне карты): ${skippedBounds}`);
+    console.log(`   - Отрисовано: ${placemarks.length}`);
+    console.log(`   - Время рендеринга: ${renderTime} сек`);
   } catch (error) {
     console.error("❌ Ошибка в renderBallons:", error);
     console.error("❌ Stack trace:", error.stack);
@@ -325,9 +348,14 @@ const renderBallons = (devices, isUpdate = false) => {
 
 // Функция для загрузки данных устройств
 const fetchDevicesData = async () => {
+  console.log("🔄 fetchDevicesData вызвана");
+
   try {
     const response = await fetch("https://meshtasticback.taubetele.com/dots");
     const data = await response.json();
+
+    console.log("📥 Получены данные:", data);
+    console.log("🔍 Структура данных:", Object.keys(data));
 
     if (data && data.data) {
       devices.value = data.data;

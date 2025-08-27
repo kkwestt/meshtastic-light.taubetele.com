@@ -1,0 +1,834 @@
+<template>
+  <div id="map">
+    <!-- Счетчик узлов в левом нижнем углу -->
+    <div class="node-counter">
+      <span v-if="devices.length === 0">🔄 Загрузка данных...</span>
+      <span v-else
+        >Узлов: {{ devices.length }}, Показано: {{ visibleNodesCount }}</span
+      >
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { onMounted, onUnmounted, ref } from "vue";
+import {
+  MAP_CONFIG,
+  MAP_PRESETS,
+  DEVICE_ROLES,
+  HARDWARE_MODELS,
+} from "../../utils/constants.js";
+import { CONFIG } from "../../config.js";
+
+const emit = defineEmits(["infoOpen"]);
+
+let map;
+const devices = ref([]);
+const visibleNodesCount = ref(0); // Количество видимых узлов
+let updateInterval = null;
+let redrawTimeout = null;
+let currentMarkers = new Map(); // Хранилище текущих маркеров по device_id
+let clusterer = null; // Кластеризатор для маркеров
+let clusteredMarkers = new Set(); // Набор ID маркеров, которые находятся в кластеризаторе
+
+// URL для получения данных
+const DOTS_API_URL = "https://meshtasticback.taubetele.com/dots";
+
+// Функция для потоковой загрузки и обновления данных
+const fetchDevicesDataStreaming = async () => {
+  try {
+    const response = await fetch(DOTS_API_URL);
+    const data = await response.json();
+
+    if (data && data.data) {
+      // Конвертируем объект в массив и фильтруем по времени
+      const currentTime = Date.now();
+      const oneDayAgo = currentTime - 24 * 60 * 60 * 1000; // 24 часа назад
+
+      const filteredDevices = Object.values(data.data).filter((device) => {
+        // Показываем только устройства, которые были активны менее 24 часов назад
+        return (
+          device.last_updated &&
+          device.last_updated > oneDayAgo &&
+          device.latitude &&
+          device.longitude
+        ); // Только с координатами
+      });
+
+      // Обновляем devices.value для отображения счетчика
+      devices.value = filteredDevices;
+
+      // Обрабатываем устройства порциями для плавного обновления
+      const batchSize = 50; // Обрабатываем по 50 устройств за раз
+
+      for (let i = 0; i < filteredDevices.length; i += batchSize) {
+        const batch = filteredDevices.slice(i, i + batchSize);
+
+        // Обрабатываем порцию устройств
+        batch.forEach((device) => {
+          updateSingleDeviceMarker(device);
+        });
+
+        // Делаем небольшую паузу между порциями для плавности
+        if (i + batchSize < filteredDevices.length) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      }
+
+      // Удаляем маркеры устройств, которые больше не в списке
+      cleanupOldMarkers(filteredDevices);
+
+      // console.log(
+      //   `Обновлено ${filteredDevices.length} устройств из ${
+      //     Object.keys(data.data).length
+      //   }`
+      // );
+      return filteredDevices;
+    }
+  } catch (error) {
+    console.error("Ошибка загрузки данных устройств:", error);
+    return [];
+  }
+};
+
+// Функция для обновления одного маркера устройства
+const updateSingleDeviceMarker = (device) => {
+  if (!map || !device.latitude || !device.longitude) return;
+
+  const useClustering = shouldUseClustering();
+
+  // При кластеризации отрисовываем все маркеры, иначе только видимые
+  if (!useClustering) {
+    const bounds = getMapBounds();
+    if (bounds && !isPointInBounds(device.latitude, device.longitude, bounds)) {
+      return; // Не отрисовываем маркеры вне видимой области при детальном просмотре
+    }
+  }
+
+  const deviceId = device.device_id;
+  const existingMarker = currentMarkers.get(deviceId);
+
+  // Если маркер уже существует и данные не изменились, пропускаем
+  if (existingMarker && existingMarker.lastUpdated === device.last_updated) {
+    return;
+  }
+
+  // Удаляем старый маркер если он есть
+  if (existingMarker) {
+    if (clusteredMarkers.has(deviceId)) {
+      clusterer.remove(existingMarker.placemark);
+      clusteredMarkers.delete(deviceId);
+    } else {
+      map.geoObjects.remove(existingMarker.placemark);
+    }
+  }
+
+  // Создаем новый маркер
+  const color = getMarkerColor(device);
+  const placemark = new ymaps.Placemark(
+    [device.latitude, device.longitude],
+    {
+      iconContent: formatValue(device.short_name, ""),
+      balloonContentHeader: formatValue(
+        device.short_name,
+        device.long_name || device.hex_id
+      ),
+      balloonContentBody: createBalloonContent(device),
+      hintContent: `${formatValue(
+        device.short_name || device.long_name,
+        device.hex_id
+      )} (${
+        color === "green" ? "Узел" : color === "blue" ? "Онлайн" : "Офлайн"
+      })`,
+    },
+    {
+      preset: getTextMarkerPreset(color),
+      hideIconOnBalloonOpen: false,
+    }
+  );
+
+  // Добавляем маркер на карту или в кластеризатор
+  if (useClustering) {
+    if (!clusterer) {
+      initClusterer();
+    }
+    clusterer.add(placemark);
+    clusteredMarkers.add(deviceId);
+  } else {
+    map.geoObjects.add(placemark);
+  }
+
+  // Сохраняем маркер в кэше
+  currentMarkers.set(deviceId, {
+    placemark: placemark,
+    lastUpdated: device.last_updated,
+    device: device,
+  });
+
+  // Обновляем счетчик видимых узлов
+  visibleNodesCount.value = currentMarkers.size;
+};
+
+// Функция для очистки старых маркеров
+const cleanupOldMarkers = (currentDevices) => {
+  const currentDeviceIds = new Set(currentDevices.map((d) => d.device_id));
+
+  // Удаляем маркеры устройств, которых больше нет в данных
+  for (const [deviceId, markerData] of currentMarkers.entries()) {
+    if (!currentDeviceIds.has(deviceId)) {
+      // Удаляем из кластеризатора или с карты
+      if (clusteredMarkers.has(deviceId)) {
+        clusterer.remove(markerData.placemark);
+        clusteredMarkers.delete(deviceId);
+      } else {
+        map.geoObjects.remove(markerData.placemark);
+      }
+      currentMarkers.delete(deviceId);
+    }
+  }
+
+  // Обновляем счетчик видимых узлов
+  visibleNodesCount.value = currentMarkers.size;
+};
+
+// Старая функция для совместимости (используется при первой загрузке)
+const fetchDevicesData = fetchDevicesDataStreaming;
+
+// Функция для определения цвета маркера
+const getMarkerColor = (device) => {
+  const currentTime = Date.now();
+  const sixHoursAgo = currentTime - 6 * 60 * 60 * 1000; // 6 часов назад
+
+  // Зеленый - если gateway и hex_id совпадают (самостоятельные узлы)
+  if (device.gateway === device.hex_id) {
+    return "green";
+  }
+
+  // Синий - онлайн (менее 6 часов назад)
+  if (device.last_updated > sixHoursAgo) {
+    return "blue";
+  }
+
+  // Серый - офлайн (от 6 до 24 часов назад)
+  return "grey";
+};
+
+// Функция для получения пресета маркера по цвету
+const getMarkerPreset = (color) => {
+  switch (color) {
+    case "green":
+      return MAP_PRESETS.MQTT; // Зеленый
+    case "blue":
+      return MAP_PRESETS.ONLINE; // Синий
+    case "grey":
+    default:
+      return MAP_PRESETS.OFFLINE; // Серый
+  }
+};
+
+// Функция для получения пресета маркера с текстом по цвету
+const getTextMarkerPreset = (color) => {
+  switch (color) {
+    case "green":
+      return "islands#darkGreenStretchyIcon"; // Зеленый с текстом
+    case "blue":
+      return "islands#blueStretchyIcon"; // Синий с текстом
+    case "grey":
+    default:
+      return "islands#greyStretchyIcon"; // Серый с текстом
+  }
+};
+
+// Функция для форматирования времени
+const formatTime = (timestamp) => {
+  if (!timestamp || timestamp === "undefined" || timestamp === 0) {
+    return "Неизвестно";
+  }
+
+  // Проверяем, является ли timestamp числом
+  const numTimestamp = Number(timestamp);
+  if (isNaN(numTimestamp)) {
+    return "Неизвестно";
+  }
+
+  // Создаем дату и проверяем её валидность
+  const date = new Date(numTimestamp);
+  if (isNaN(date.getTime())) {
+    return "Неизвестно";
+  }
+
+  return date.toLocaleString("ru-RU");
+};
+
+// Функция для форматирования значений
+const formatValue = (value, defaultText = "Не указано") => {
+  // Проверяем на различные виды "пустых" значений
+  if (
+    value === undefined ||
+    value === null ||
+    value === "" ||
+    value === "undefined" ||
+    value === "null" ||
+    (typeof value === "number" && isNaN(value))
+  ) {
+    return defaultText;
+  }
+  return value;
+};
+
+// Функция для создания содержимого балуна
+const createBalloonContent = (device) => {
+  return `
+    <div style="max-width: 300px; font-size: 12px;">
+      <h4 style="margin: 0 0 10px 0; color: #333;">${formatValue(
+        device.long_name,
+        device.short_name || device.hex_id
+      )}</h4>
+
+      <div style="display: grid; grid-template-columns: auto 1fr; gap: 5px 10px; font-family: monospace;">
+        <strong>ID устройства:</strong> <span>${formatValue(
+          device.device_id
+        )}</span>
+        <strong>Hex ID:</strong> <span>${formatValue(device.hex_id)}</span>
+        <strong>Сервер:</strong> <span>${formatValue(device.server)}</span>
+        <strong>Шлюз:</strong> <span>${formatValue(device.gateway)}</span>
+
+        <strong>Широта:</strong> <span>${formatValue(
+          device.latitude?.toFixed(6)
+        )}</span>
+        <strong>Долгота:</strong> <span>${formatValue(
+          device.longitude?.toFixed(6)
+        )}</span>
+        <strong>Высота:</strong> <span>${formatValue(device.altitude)} м</span>
+        <strong>Спутники:</strong> <span>${formatValue(
+          device.sats_in_view
+        )}</span>
+
+        <strong>Модель:</strong> <span>${formatValue(
+          HARDWARE_MODELS[device.hw_model],
+          `ID: ${device.hw_model}`
+        )}</span>
+        <strong>Роль:</strong> <span>${formatValue(
+          DEVICE_ROLES[device.role],
+          `ID: ${device.role}`
+        )}</span>
+
+        <strong>Батарея:</strong> <span>${formatValue(
+          device.battery_level
+        )}%</span>
+        <strong>Напряжение:</strong> <span>${formatValue(
+          device.voltage
+        )} В</span>
+        <strong>Загрузка канала:</strong> <span>${formatValue(
+          device.channel_utilization
+        )}%</span>
+        <strong>Air Util TX:</strong> <span>${formatValue(
+          device.air_util_tx
+        )}</span>
+        <strong>Время работы:</strong> <span>${formatValue(
+          device.uptime_seconds
+        )} сек</span>
+
+        <strong>Обновлено:</strong> <span>${formatTime(
+          device.last_updated
+        )}</span>
+        <strong>position_time:</strong> <span>${formatTime(
+          device.position_time
+        )}</span>
+      </div>
+    </div>
+  `;
+};
+
+// Функция инициализации кластеризатора
+const initClusterer = () => {
+  if (clusterer) {
+    return clusterer;
+  }
+
+  clusterer = new ymaps.Clusterer({
+    preset: "islands#invertedBlueClusterIcons",
+    groupByCoordinates: false,
+    clusterDisableClickZoom: false,
+    clusterHideIconOnBalloonOpen: false,
+    geoObjectHideIconOnBalloonOpen: false,
+    gridSize: 64, // Используем степень двойки как рекомендовано
+    maxZoom: 20, // Кластеризация работает на всех больших зумах (8+)
+    minZoom: 8, // Кластеризация начинается с зума 8
+    minClusterSize: 2,
+    clusterIconLayout: "default#cluster",
+  });
+
+  map.geoObjects.add(clusterer);
+
+  // Проверяем, что кластеризатор добавлен
+  console.log("✅ Кластеризатор инициализирован и добавлен на карту");
+  console.log(`   - gridSize: ${clusterer.options.get("gridSize")}`);
+  console.log(`   - maxZoom: ${clusterer.options.get("maxZoom")}`);
+  console.log(`   - preset: ${clusterer.options.get("preset")}`);
+
+  return clusterer;
+};
+
+// Функция для проверки, нужна ли кластеризация
+const shouldUseClustering = () => {
+  if (!map) return false;
+  const zoom = map.getZoom();
+  // Используем кластеризацию при зуме больше 8 (дальние виды)
+  // Индивидуальные маркеры при зуме 7 и меньше (близкие виды)
+  return zoom > 7;
+};
+
+// Функция для очистки маркеров с карты
+const clearDeviceMarkers = () => {
+  if (!map) return;
+
+  if (clusterer) {
+    clusterer.removeAll();
+  }
+
+  // Удаляем все маркеры устройств из кэша и карты (для некластеризованного режима)
+  for (const [deviceId, markerData] of currentMarkers.entries()) {
+    if (!clusteredMarkers.has(deviceId)) {
+      map.geoObjects.remove(markerData.placemark);
+    }
+  }
+  currentMarkers.clear();
+  clusteredMarkers.clear();
+
+  // Обновляем счетчик видимых узлов
+  visibleNodesCount.value = 0;
+};
+
+// Функция для получения видимой области карты
+const getMapBounds = () => {
+  if (!map) return null;
+  return map.getBounds();
+};
+
+// Функция для проверки, находится ли точка в видимой области
+const isPointInBounds = (lat, lng, bounds) => {
+  if (!bounds) return true;
+  const [[southWest], [northEast]] = bounds;
+  return (
+    lat >= southWest &&
+    lat <= northEast &&
+    lng >= bounds[0][1] &&
+    lng <= bounds[1][1]
+  );
+};
+
+// Функция для фильтрации устройств по видимой области
+const getVisibleDevices = () => {
+  if (!devices.value.length) return [];
+
+  const bounds = getMapBounds();
+  if (!bounds) return devices.value;
+
+  return devices.value.filter((device) => {
+    if (!device.latitude || !device.longitude) return false;
+    return isPointInBounds(device.latitude, device.longitude, bounds);
+  });
+};
+
+// Функция для переключения режима отображения маркеров (кластеризация/индивидуальные)
+const switchMarkerMode = () => {
+  if (!map || !devices.value.length) return;
+
+  const useClustering = shouldUseClustering();
+
+  if (useClustering) {
+    // Переключаемся в режим кластеризации
+    if (!clusterer) {
+      initClusterer();
+    }
+
+    // Кластеризатор уже добавлен при инициализации
+
+    // Очищаем кластеризатор и добавляем все маркеры заново
+    clusterer.removeAll();
+    const allPlacemarks = [];
+
+    devices.value.forEach((device) => {
+      if (device.latitude && device.longitude) {
+        const color = getMarkerColor(device);
+        const placemark = new ymaps.Placemark(
+          [device.latitude, device.longitude],
+          {
+            iconContent: formatValue(device.short_name, ""),
+            balloonContentHeader: formatValue(
+              device.short_name,
+              device.long_name || device.hex_id
+            ),
+            balloonContentBody: createBalloonContent(device),
+            hintContent: `${formatValue(
+              device.short_name || device.long_name,
+              device.hex_id
+            )} (${
+              color === "green"
+                ? "Узел"
+                : color === "blue"
+                ? "Онлайн"
+                : "Офлайн"
+            })`,
+          },
+          {
+            preset: getTextMarkerPreset(color),
+            hideIconOnBalloonOpen: false,
+          }
+        );
+        allPlacemarks.push(placemark);
+      }
+    });
+
+    // Добавляем все маркеры в кластеризатор одним вызовом
+    if (allPlacemarks.length > 0) {
+      clusterer.add(allPlacemarks);
+      console.log(
+        `🔄 Кластеризация: добавлено ${allPlacemarks.length} маркеров в кластеризатор`
+      );
+
+      // Диагностическая информация и установка границ
+      setTimeout(() => {
+        try {
+          const geoObjects = clusterer.getGeoObjects();
+          const clusters = clusterer.getClusters();
+          console.log(`📊 Диагностика кластеризатора:`);
+          console.log(`   - Объекты в кластеризаторе: ${geoObjects.length}`);
+          console.log(`   - Кластеры: ${clusters.length}`);
+          console.log(`   - Текущий зум: ${map.getZoom()}`);
+          console.log(`   - Центр карты: ${map.getCenter()}`);
+          console.log(
+            `   - Кластеризатор на карте: ${
+              map.geoObjects.get(0) === clusterer
+            }`
+          );
+          // Состояние кластеризатора (может быть недоступно в некоторых версиях API)
+          try {
+            console.log(
+              `   - Состояние кластеризатора:`,
+              clusterer.state ? clusterer.state.get("ready") : "неизвестно"
+            );
+          } catch (stateError) {
+            console.log(`   - Состояние кластеризатора: недоступно`);
+          }
+
+          // Пример первых координат для проверки
+          if (allPlacemarks.length > 0) {
+            try {
+              const firstCoords = allPlacemarks[0].geometry.getCoordinates();
+              console.log(
+                `   - Первый маркер: [${firstCoords[0]}, ${firstCoords[1]}]`
+              );
+            } catch (coordError) {
+              console.log(
+                `⚠️ Ошибка получения координат первого маркера:`,
+                coordError
+              );
+            }
+          }
+
+          // Устанавливаем границы только при первой загрузке (если карта в исходном положении)
+          const currentCenter = map.getCenter();
+          const isDefaultPosition =
+            Math.abs(currentCenter[0] - MAP_CONFIG.DEFAULT_CENTER[0]) < 0.1 &&
+            Math.abs(currentCenter[1] - MAP_CONFIG.DEFAULT_CENTER[1]) < 0.1;
+
+          if (isDefaultPosition) {
+            try {
+              const bounds = clusterer.getBounds();
+              if (bounds && bounds.length === 2) {
+                map.setBounds(bounds, {
+                  checkZoomRange: true,
+                  zoomMargin: 50,
+                });
+                console.log(
+                  `🗺️ Установлены границы карты для кластеризатора (первая загрузка)`
+                );
+              }
+            } catch (boundsError) {
+              console.log(`❌ Ошибка установки границ:`, boundsError);
+            }
+          }
+        } catch (error) {
+          console.log(`❌ Общая ошибка в диагностике кластеризатора:`, error);
+        }
+      }, 500);
+    }
+
+    visibleNodesCount.value = devices.value.length;
+  } else {
+    // Переключаемся в режим индивидуальных маркеров
+
+    // Очищаем кластеризатор
+    if (clusterer) {
+      clusterer.removeAll();
+      console.log(`🔄 Индивидуальные маркеры: очищен кластеризатор`);
+    }
+
+    // Очищаем индивидуальные маркеры
+    for (const [deviceId, markerData] of currentMarkers.entries()) {
+      if (!clusteredMarkers.has(deviceId)) {
+        map.geoObjects.remove(markerData.placemark);
+      }
+    }
+    currentMarkers.clear();
+
+    // Добавляем только видимые маркеры
+    const visibleDevices = getVisibleDevices();
+    visibleDevices.forEach((device) => {
+      updateSingleDeviceMarker(device);
+    });
+
+    visibleNodesCount.value = currentMarkers.size;
+  }
+
+  const currentZoom = map.getZoom();
+  console.log(
+    `${
+      useClustering ? "Кластеризация" : "Индивидуальные маркеры"
+    } (зум ${currentZoom}): отображено ${visibleNodesCount.value} из ${
+      devices.value.length
+    } устройств`
+  );
+};
+
+// Функция для создания маркеров на карте (используется при изменении viewport)
+const createDeviceMarkers = switchMarkerMode;
+
+// Функция для обновления маркеров (потоковое обновление)
+const updateDeviceMarkers = async () => {
+  await fetchDevicesDataStreaming();
+
+  // Очищаем кластеризатор для повторного наполнения
+  if (clusterer) {
+    clusterer.removeAll();
+  }
+
+  // Переключаемся в нужный режим
+  switchMarkerMode();
+};
+
+// Переменная для отслеживания состояния загрузки API
+let apiLoadPromise = null;
+
+// Функция для загрузки Yandex Maps API
+const loadYandexMaps = () => {
+  // Если API уже загружен, возвращаем его
+  if (window.ymaps && window.ymaps.ready) {
+    return Promise.resolve(window.ymaps);
+  }
+
+  // Если API уже загружается, возвращаем существующий промис
+  if (apiLoadPromise) {
+    return apiLoadPromise;
+  }
+
+  // Создаем новый промис для загрузки API
+  apiLoadPromise = new Promise((resolve, reject) => {
+    // Проверяем наличие API ключа
+    if (!CONFIG.YANDEX_MAPS_API_KEY) {
+      reject(
+        new Error("❌ API ключ Yandex Maps не найден. Проверьте файл .env")
+      );
+      return;
+    }
+
+    // Проверяем, не загружается ли уже скрипт
+    const existingScript = document.querySelector(
+      'script[src*="api-maps.yandex.ru"]'
+    );
+    if (existingScript) {
+      // Ждем загрузки существующего скрипта
+      existingScript.onload = () => {
+        if (window.ymaps) {
+          // console.info(
+          //   "✅ Yandex Maps API успешно загружен (повторное использование)"
+          // );
+          resolve(window.ymaps);
+        } else {
+          reject(new Error("Yandex Maps API не загружен"));
+        }
+      };
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = `${CONFIG.YANDEX_MAPS_API_URL}&apikey=${CONFIG.YANDEX_MAPS_API_KEY}`;
+    script.async = true;
+
+    script.onload = () => {
+      if (window.ymaps) {
+        console.info("✅ Yandex Maps API успешно загружен");
+        resolve(window.ymaps);
+      } else {
+        reject(new Error("Yandex Maps API не загружен"));
+      }
+    };
+
+    script.onerror = () => {
+      console.warn("❌ Ошибка загрузки Yandex Maps API");
+      apiLoadPromise = null; // Сбрасываем промис при ошибке
+      reject(new Error("Ошибка загрузки Yandex Maps API"));
+    };
+
+    document.head.appendChild(script);
+  });
+
+  return apiLoadPromise;
+};
+
+onMounted(async () => {
+  const renderSelfBallon = (shouldSetCenter) => {
+    // Добавляем геолокацию, но только по клику пользователя
+    if (shouldSetCenter) {
+      // Центрируем карту на Москве по умолчанию
+      map.setCenter(MAP_CONFIG.DEFAULT_CENTER, MAP_CONFIG.DEFAULT_ZOOM);
+    }
+  };
+
+  // Функция для запроса геолокации по клику пользователя
+  const requestUserLocation = () => {
+    let geolocation = ymaps.geolocation;
+    geolocation
+      .get({
+        provider: "auto",
+        mapStateAutoApply: false,
+        timeout: 10000,
+      })
+      .then(function (result) {
+        result.geoObjects.options.set("preset", MAP_PRESETS.GEOLOCATION);
+        result.geoObjects
+          .get(0)
+          .properties.set({ balloonContentBody: "Вы здесь!" });
+        map.geoObjects.add(result.geoObjects);
+        map.setCenter(result.geoObjects.get(0).geometry.getCoordinates(), 12);
+        console.log("✅ Геолокация пользователя найдена");
+      })
+      .catch(function (error) {
+        console.log("Геолокация недоступна:", error.message);
+      });
+  };
+
+  // Функция для перерисовки маркеров при изменении карты (с дебаунсингом)
+  const onMapChange = () => {
+    try {
+      // Очищаем предыдущий таймер
+      if (redrawTimeout) {
+        clearTimeout(redrawTimeout);
+      }
+
+      // Устанавливаем новый таймер с задержкой 300мс
+      redrawTimeout = setTimeout(() => {
+        try {
+          // Не очищаем кластеризатор при изменении карты, только переключаем режим
+          switchMarkerMode();
+        } catch (innerError) {
+          console.error("❌ Ошибка в таймере onMapChange:", innerError);
+        }
+      }, 300);
+    } catch (error) {
+      console.error("❌ Ошибка в onMapChange:", error);
+    }
+  };
+
+  const initYMap = () => {
+    map = new ymaps.Map("map", {
+      center: MAP_CONFIG.DEFAULT_CENTER,
+      zoom: MAP_CONFIG.DEFAULT_ZOOM,
+    });
+
+    // Убираем ненужные контролы (по желанию)
+    map.controls.remove("fullscreenControl");
+    map.controls.remove("searchControl");
+
+    // Добавляем кнопку INFO
+    let infoButton = new ymaps.control.Button("INFO");
+    map.controls.add(infoButton, {
+      selectOnClick: false,
+      float: "left",
+      floatIndex: 1,
+    });
+    infoButton.events.add("click", function () {
+      emit("infoOpen");
+    });
+
+    // Добавляем обработчики событий для перерисовки маркеров
+    map.events.add("boundschange", onMapChange);
+    map.events.add("actionend", onMapChange);
+
+    // Добавляем обработчик изменения зума для переключения кластеризации
+    map.events.add("boundschange", (e) => {
+      try {
+        // Переключаем режим отображения только при изменении зума
+        if (e.get("newZoom") !== e.get("oldZoom")) {
+          setTimeout(() => {
+            try {
+              switchMarkerMode();
+            } catch (switchError) {
+              console.error("❌ Ошибка при переключении режима:", switchError);
+            }
+          }, 200);
+        }
+      } catch (error) {
+        console.error("❌ Ошибка в обработчике зума:", error);
+      }
+    });
+  };
+
+  const init = async () => {
+    initYMap();
+    renderSelfBallon(true); // true означает центрировать карту на геолокации
+
+    // Инициализируем кластеризатор
+    initClusterer();
+
+    // загружаем данные устройств при старте
+    await fetchDevicesData();
+    switchMarkerMode(); // Применяем правильный режим отображения
+
+    // Устанавливаем автообновление каждые 20 секунд
+    updateInterval = setInterval(updateDeviceMarkers, 20000);
+  };
+
+  // Загружаем Yandex Maps
+  try {
+    await loadYandexMaps();
+    window.ymaps.ready(init);
+  } catch (error) {
+    console.error("Ошибка загрузки Yandex Maps:", error);
+  }
+});
+
+// Очистка интервала и таймеров при размонтировании компонента
+onUnmounted(() => {
+  if (updateInterval) {
+    clearInterval(updateInterval);
+  }
+  if (redrawTimeout) {
+    clearTimeout(redrawTimeout);
+  }
+});
+</script>
+
+<style lang="scss">
+// Базовые стили для карты
+.node-counter {
+  position: absolute;
+  bottom: 35px;
+  left: 7px;
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(5px);
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  z-index: 1000;
+  user-select: none;
+  pointer-events: none;
+}
+</style>

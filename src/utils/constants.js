@@ -1,12 +1,5 @@
 // Конфигурация карты
-export const API_CONFIG = {
-  BASE_URL_MAIN: "https://meshtasticback.taubetele.com/api",
-  BASE_URL_ALL: "https://meshtasticback.taubetele.com",
-  GPS_ENDPOINT: "https://meshtasticback.taubetele.com/gps",
-  DEVICE_METRICS_ENDPOINT: "https://meshtasticback.taubetele.com/deviceMetrics",
-  ENVIRONMENT_METRICS_ENDPOINT:
-    "https://meshtasticback.taubetele.com/environmentMetrics",
-};
+
 export const MAP_CONFIG = {
   DEFAULT_CENTER: [55.76, 37.64], // Москва
   DEFAULT_ZOOM: 9,
@@ -20,12 +13,13 @@ export const MAP_PRESETS = {
   ONLINE: "islands#blueStretchyIcon",
   MQTT: "islands#darkGreenStretchyIcon",
   OFFLINE: "islands#greyStretchyIcon",
-  INACTIVE: "islands#greyStretchyIcon", // Для устройств неактивных >12 часов
+  INACTIVE: "islands#greyStretchyIcon",
   CLUSTER: "islands#blueClusterIcons",
   GEOLOCATION: "islands#redCircleIcon",
 };
 
 // SVG иконки
+
 export const ICONS = {
   CHART:
     '<svg xmlns="http://www.w3.org/2000/svg" height="1em" viewBox="0 0 448 512"><path d="M160 80c0-26.5 21.5-48 48-48h32c26.5 0 48 21.5 48 48V432c0 26.5-21.5 48-48 48H208c-26.5 0-48-21.5-48-48V80zM0 272c0-26.5 21.5-48 48-48H80c26.5 0 48 21.5 48 48V432c0 26.5-21.5 48-48 48H48c-26.5 0-48-21.5-48-48V272zM368 96h32c26.5 0 48 21.5 48 48V432c0 26.5-21.5 48-48 48H368c-26.5 0-48-21.5-48-48V144c0-26.5 21.5-48 48-48z" fill="currentColor" /></svg>',
@@ -160,4 +154,23 @@ export const HARDWARE_MODELS = {
   106: "RAK3312",
   107: "THINKNODE M5",
   255: "PRIVATE HW",
+};
+
+// Временные интервалы
+export const TIME_INTERVALS = {
+  MESSAGE_VISIBILITY_THRESHOLD: 300, // 5 минут в секундах
+  DEVICE_ACTIVE_THRESHOLD: 6 * 60 * 60, // 6 часов в секундах (для голубых нод)
+  DEVICE_RECENTLY_ACTIVE_THRESHOLD: 24 * 60 * 60, // 24 часа в секундах (максимальный возраст для отображения)
+};
+
+// UI конфигурация
+export const UI_CONFIG = {
+  DEBOUNCE_MAP_DELAY: 300, // Задержка для debounce карты в мс
+};
+
+// API конфигурация
+export const API_CONFIG = {
+  BASE_URL_MAIN: "https://meshtasticback.taubetele.com",
+  GPS_ENDPOINT: "https://meshtasticback.taubetele.com/POSITION_APP",
+  DEVICE_METRICS_ENDPOINT: "https://meshtasticback.taubetele.com/TELEMETRY_APP",
 };

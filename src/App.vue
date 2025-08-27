@@ -1,8 +1,6 @@
 <template>
-  <!-- Простая Yandex карта -->
   <dots-map @infoOpen="handleInfoOpen" @devicesCount="handleDevicesCount" />
 
-  <!-- Модальное окно с информацией о Meshtastic -->
   <modal
     v-if="shouldShowInfoModal"
     title="🌐 Что такое Meshtastic?"
@@ -122,13 +120,7 @@ import { ref } from "vue";
 import DotsMap from "./components/map/DotsMap.vue";
 import Modal from "./components/Modal.vue";
 
-// Информация о приложении
-console.log("🗺️ Простая Yandex карта загружается...");
-
-// Состояние модального окна
 const shouldShowInfoModal = ref(false);
-
-// Счетчик устройств
 const devicesCount = ref(0);
 
 const handleInfoOpen = () => {
@@ -145,7 +137,6 @@ const handleDevicesCount = (count) => {
 </script>
 
 <style lang="scss">
-// Убираем все лишние стили, оставляем только базовые
 html,
 body {
   margin: 0;
@@ -167,7 +158,6 @@ body {
   height: 100vh;
 }
 
-// Стили для модального окна с информацией
 .info-section {
   margin-bottom: 1.5rem;
 

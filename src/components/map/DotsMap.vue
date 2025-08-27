@@ -140,42 +140,48 @@ const createBalloonContent = async (device, nodeId) => {
 
       if (rawData) {
         nodeInfoHtml = `
+
           <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #eee;">
             <div style="font-weight: bold; margin-bottom: 4px;">Информация об узле:</div>
+            <div style="margin-top: 4px; font-size: 10px; color: #666;">
+              Последнее обновление: ${formatTime(latestInfo.timestamp)}
+            </div>
             <div style="display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; font-size: 11px;">
               ${
-                rawData.long_name
-                  ? `<span>Полное имя:</span><span>${rawData.long_name}</span>`
+                rawData.is_unmessagable
+                  ? `<span>Принимает сообщения:</span><span>${
+                      !rawData.is_unmessagable ? "Да" : "Нет"
+                    }</span>`
                   : ""
               }
               ${
-                rawData.short_name
-                  ? `<span>Короткое имя:</span><span>${rawData.short_name}</span>`
-                  : ""
-              }
-              ${
-                rawData.macaddr
-                  ? `<span>MAC:</span><span>${rawData.macaddr}</span>`
+                rawData.id
+                  ? `<span>ID:</span><span>${rawData.id} (${nodeId}) </span>`
                   : ""
               }
               ${
                 rawData.hw_model
-                  ? `<span>Модель:</span><span>HW_${rawData.hw_model}</span>`
+                  ? `<span>Модель:</span><span>${
+                      HARDWARE_MODELS[rawData.hw_model]
+                    }</span>`
                   : ""
               }
               ${
-                latestInfo.rxSnr !== undefined
-                  ? `<span>SNR:</span><span>${latestInfo.rxSnr} dB</span>`
-                  : ""
-              }
-              ${
+                latestInfo.rxSnr !== undefined &&
                 latestInfo.rxRssi !== undefined
-                  ? `<span>RSSI:</span><span>${latestInfo.rxRssi} dBm</span>`
+                  ? latestInfo.rxSnr === 0 && latestInfo.rxRssi === 0
+                    ? `<span>Статус:</span><span>MQTT Connected</span>`
+                    : `<span>SNR:</span><span>${latestInfo.rxSnr} dB</span>
+                       <span>RSSI:</span><span>${latestInfo.rxRssi} dBm</span>`
                   : ""
               }
               ${
                 latestInfo.hopLimit !== undefined
-                  ? `<span>Hop Limit:</span><span>${latestInfo.hopLimit}</span>`
+                  ? `<span>Hop Limit:</span><span>${
+                      7 - latestInfo.hopLimit === 0
+                        ? "Direct"
+                        : 7 - latestInfo.hopLimit
+                    }</span>`
                   : ""
               }
               ${
@@ -184,9 +190,7 @@ const createBalloonContent = async (device, nodeId) => {
                   : ""
               }
             </div>
-            <div style="margin-top: 4px; font-size: 10px; color: #666;">
-              Последнее обновление: ${formatTime(latestInfo.timestamp)}
-            </div>
+
           </div>
         `;
       }

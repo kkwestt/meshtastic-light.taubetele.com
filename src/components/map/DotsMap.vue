@@ -12,6 +12,13 @@
         <span class="update-text">Автообновление</span>
       </div>
     </div>
+
+    <!-- Геолокация статус -->
+    <div class="geolocation-status" v-if="geolocationStatus">
+      <span :class="geolocationStatus.type">{{
+        geolocationStatus.message
+      }}</span>
+    </div>
   </div>
 </template>
 
@@ -42,6 +49,15 @@ const handleMapClick = (event) => {
 const devices = ref({});
 const pointsOnMap = ref(0);
 const filteredDevicesCache = ref(new Map());
+const geolocationStatus = ref(null);
+
+const clearGeolocationStatus = () => {
+  setTimeout(() => {
+    if (geolocationStatus.value?.type === "success") {
+      geolocationStatus.value = null;
+    }
+  }, 5000); // Очищаем успешный статус через 5 секунд
+};
 
 const filterDevicesByBounds = (devices, bounds) => {
   if (!bounds || !devices) return [];
@@ -147,7 +163,11 @@ const createBalloonContent = async (device, nodeId) => {
 
       if (rawData) {
         nodeInfoHtml = `
-
+    ${
+      device.mqtt === "1"
+        ? '<div style="font-weight: bold; color: #2E7D32; margin-bottom: 4px;">MQTT Шлюз</div>'
+        : ""
+    }
     <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid #eee;">
     <div style="font-weight: bold;">Информация об узле: ${formatTime(
       latestInfo.timestamp
@@ -806,20 +826,22 @@ const createBalloonContent = async (device, nodeId) => {
     <div style="font-size: 11px; line-height: 1.3;">
     ${
       routeDisplay
-        ? `<div style="margin-bottom: 2px; word-break: break-all;">${routeDisplay}</div>`
+        ? `<div style="margin-bottom: 2px; word-break: break-all;">Маршрут туда: ${routeDisplay}</div>`
         : ""
     }
     ${
-      backRouteDisplay !== "нет маршрута"
-        ? `<div style="margin-bottom: 2px; color: #666;">Обратно: ${backRouteDisplay}</div>`
-        : `<div style="margin-bottom: 2px; color: #666;">Обратно: ${backRouteDisplay}</div>`
+      backRouteDisplay !== "Нет маршрута"
+        ? `<div style="margin-bottom: 2px;">Обратно: ${backRouteDisplay}</div>`
+        : ""
     }
     ${
-      metricsLine ? `<div style="margin-bottom: 2px;">${metricsLine}</div>` : ""
+      metricsLine
+        ? `<div style="font-size: 10px; color: #666; margin: 0; line-height: 1.2;">${metricsLine}</div>`
+        : ""
     }
     ${
       latestTrace.gatewayId
-        ? `<div style="margin-bottom: 2px;">Gateway: ${latestTrace.gatewayId}</div>`
+        ? `<div style="font-size: 10px; color: #666; margin: 0; line-height: 1.2;">Gateway: ${latestTrace.gatewayId}</div>`
         : ""
     }
     </div>
@@ -899,11 +921,28 @@ const renderBallons = (devices, isUpdate = false) => {
       if (!isPointInBounds(device.latitude, device.longitude, bounds)) continue;
 
       let presetcolor;
-      if (timeDiffHours < 6) {
+      let iconOptions = {};
+
+      if (timeDiffHours < 6 && (device.mqtt === "1" || device.mqtt === 1)) {
+        // Если точка онлайн И подключена через MQTT - зеленая
+        presetcolor = MAP_PRESETS.MQTT;
+        iconOptions = {
+          preset: `${presetcolor}`,
+        };
+      } else if (timeDiffHours < 6) {
+        // Если точка онлайн, но НЕ MQTT - цвет ONLINE
         presetcolor = MAP_PRESETS.ONLINE;
-      } else {
+        iconOptions = {
+          preset: `${presetcolor}`,
+        };
+      } else if (timeDiffHours >= 6) {
+        // Если точка не передавала данные больше 6 часов - серая
         presetcolor = MAP_PRESETS.INACTIVE;
+        iconOptions = {
+          preset: `${presetcolor}`,
+        };
       }
+      // Иначе точку не показываем (iconOptions остается пустым)
 
       const timestampfooter = formatTime(device.s_time);
 
@@ -924,7 +963,7 @@ const renderBallons = (devices, isUpdate = false) => {
           }</strong>`,
           nodeId,
         },
-        { preset: `${presetcolor}` }
+        iconOptions
       );
 
       placemark.events.add("balloonopen", async (event) => {
@@ -949,7 +988,6 @@ const renderBallons = (devices, isUpdate = false) => {
           );
         }
       });
-
       placemarks.push(placemark);
     }
 
@@ -1062,6 +1100,19 @@ const updateDevicesData = async () => {
 };
 
 onMounted(async () => {
+  // Проверяем наличие API ключа
+  const apiKey = import.meta.env.VITE_YANDEX_MAPS_API_KEY;
+  if (!apiKey) {
+    console.error(
+      "❌ Yandex Maps API ключ не найден! Создайте файл .env с VITE_YANDEX_MAPS_API_KEY"
+    );
+    geolocationStatus.value = {
+      type: "error",
+      message: "❌ API ключ Yandex Maps не найден. Создайте файл .env",
+    };
+    return;
+  }
+
   startDataUpdates();
 
   onUnmounted(() => {
@@ -1069,41 +1120,112 @@ onMounted(async () => {
   });
 
   const renderSelfBallon = (shouldSetCenter = false) => {
-    console.log("Запрос геолокации, shouldSetCenter:", shouldSetCenter);
+    // Проверяем поддержку геолокации
+    if (!navigator.geolocation) {
+      geolocationStatus.value = {
+        type: "error",
+        message: "Геолокация не поддерживается браузером",
+      };
+      if (shouldSetCenter) {
+        map.setCenter(MAP_CONFIG.DEFAULT_CENTER, MAP_CONFIG.DEFAULT_ZOOM);
+      }
+      return;
+    }
 
-    ymaps.geolocation
-      .get({
-        provider: "auto",
-        mapStateAutoApply: false,
-        timeout: 10000,
-      })
-      .then(function (result) {
+    // Сначала пробуем браузерную геолокацию
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
         try {
-          console.log("Геолокация получена успешно");
-          result.geoObjects.options.set("preset", MAP_PRESETS.GEOLOCATION);
-          result.geoObjects
-            .get(0)
-            .properties.set({ balloonContentBody: "Вы здесь!" });
-          map.geoObjects.add(result.geoObjects);
+          const coords = [position.coords.latitude, position.coords.longitude];
+
+          // Создаем маркер геолокации
+          const geolocationPlacemark = new ymaps.Placemark(
+            coords,
+            {
+              balloonContentBody: "Вы здесь!",
+            },
+            {
+              preset: MAP_PRESETS.GEOLOCATION,
+            }
+          );
+
+          map.geoObjects.add(geolocationPlacemark);
 
           if (shouldSetCenter) {
-            const coords = result.geoObjects.get(0).geometry.getCoordinates();
-            console.log("Центрирование карты на координатах:", coords);
-            map.setCenter(coords, MAP_CONFIG.DEFAULT_ZOOM + 1);
+            map.setCenter(coords, MAP_CONFIG.DEFAULT_ZOOM + 8);
           }
         } catch (error) {
-          console.error("Ошибка обработки геолокации:", error);
+          console.error("Ошибка обработки браузерной геолокации:", error);
+          geolocationStatus.value = {
+            type: "error",
+            message: "Ошибка обработки геолокации",
+          };
           if (shouldSetCenter) {
             map.setCenter(MAP_CONFIG.DEFAULT_CENTER, MAP_CONFIG.DEFAULT_ZOOM);
           }
         }
-      })
-      .catch(function (error) {
-        console.error("Ошибка получения геолокации:", error);
-        if (shouldSetCenter) {
-          map.setCenter(MAP_CONFIG.DEFAULT_CENTER, MAP_CONFIG.DEFAULT_ZOOM);
-        }
-      });
+      },
+      (error) => {
+        console.warn("Браузерная геолокация недоступна:", error.message);
+
+        geolocationStatus.value = {
+          type: "warning",
+          message:
+            "Браузерная геолокация недоступна, пробуем альтернативный способ...",
+        };
+
+        // Fallback к Yandex Maps геолокации
+        ymaps.geolocation
+          .get({
+            provider: "auto",
+            mapStateAutoApply: false,
+            timeout: 10000,
+          })
+          .then(function (result) {
+            try {
+              result.geoObjects.options.set("preset", MAP_PRESETS.GEOLOCATION);
+              result.geoObjects
+                .get(0)
+                .properties.set({ balloonContentBody: "Вы здесь!" });
+              map.geoObjects.add(result.geoObjects);
+
+              if (shouldSetCenter) {
+                const coords = result.geoObjects
+                  .get(0)
+                  .geometry.getCoordinates();
+                map.setCenter(coords, MAP_CONFIG.DEFAULT_ZOOM + 1);
+              }
+            } catch (error) {
+              console.error("Ошибка обработки Yandex Maps геолокации:", error);
+              geolocationStatus.value = {
+                type: "error",
+                message: "Ошибка обработки Yandex Maps геолокации",
+              };
+              if (shouldSetCenter) {
+                map.setCenter(
+                  MAP_CONFIG.DEFAULT_CENTER,
+                  MAP_CONFIG.DEFAULT_ZOOM
+                );
+              }
+            }
+          })
+          .catch(function (error) {
+            console.error("Ошибка получения Yandex Maps геолокации:", error);
+            geolocationStatus.value = {
+              type: "error",
+              message: "Не удалось определить местоположение",
+            };
+            if (shouldSetCenter) {
+              map.setCenter(MAP_CONFIG.DEFAULT_CENTER, MAP_CONFIG.DEFAULT_ZOOM);
+            }
+          });
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 60000, // 1 минута
+      }
+    );
   };
 
   const initYMap = () => {
@@ -1161,7 +1283,14 @@ onMounted(async () => {
     window.ymaps.ready(() => init().catch(console.error));
   } else {
     const script = document.createElement("script");
-    script.src = "https://api-maps.yandex.ru/2.1/?lang=ru_RU";
+    const apiKey = import.meta.env.VITE_YANDEX_MAPS_API_KEY;
+    if (!apiKey) {
+      console.error(
+        "❌ Yandex Maps API ключ не найден! Создайте файл .env с VITE_YANDEX_MAPS_API_KEY"
+      );
+      return;
+    }
+    script.src = `https://api-maps.yandex.ru/2.1/?apikey=${apiKey}&lang=ru_RU`;
     script.async = true;
 
     script.onload = () => {
@@ -1230,5 +1359,37 @@ onMounted(async () => {
   100% {
     opacity: 1;
   }
+}
+
+.geolocation-status {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(5px);
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  z-index: 1000;
+  user-select: none;
+  pointer-events: none;
+  max-width: 300px;
+  word-wrap: break-word;
+}
+
+.geolocation-status .success {
+  color: #2e7d32;
+}
+
+.geolocation-status .warning {
+  color: #f57c00;
+}
+
+.geolocation-status .error {
+  color: #d32f2f;
 }
 </style>

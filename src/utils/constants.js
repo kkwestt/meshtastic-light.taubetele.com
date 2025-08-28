@@ -185,4 +185,6 @@ export const API_CONFIG = {
   TEXT_MESSAGE_ENDPOINT:
     "https://meshtasticback.taubetele.com/TEXT_MESSAGE_APP",
   MAP_REPORT_ENDPOINT: "https://meshtasticback.taubetele.com/MAP_REPORT_APP",
+  TRACEROUTE_APP_ENDPOINT:
+    "https://meshtasticback.taubetele.com/TRACEROUTE_APP",
 };

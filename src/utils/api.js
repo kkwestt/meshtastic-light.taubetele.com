@@ -108,4 +108,21 @@ export const meshtasticApi = {
       return null;
     }
   },
+
+  // Добавляю новый метод для получения данных TRACEROUTE_APP
+  async getTracerouteInfo(nodeId) {
+    try {
+      const response = await fetch(
+        `${API_CONFIG.TRACEROUTE_APP_ENDPOINT}:${nodeId}`
+      );
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error("Ошибка получения данных traceroute:", error);
+      return null;
+    }
+  },
 };

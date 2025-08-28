@@ -136,6 +136,7 @@ const createBalloonContent = async (device, nodeId) => {
   let telemetryInfoHtml = "";
   let textMessagesHtml = "";
   let mapReportHtml = "";
+  let tracerouteHtml = "";
 
   try {
     const nodeInfo = await meshtasticApi.getNodeInfo(nodeId);
@@ -171,30 +172,51 @@ const createBalloonContent = async (device, nodeId) => {
           }</span>`
         : ""
     }
-    ${
-      latestInfo.rxSnr !== undefined && latestInfo.rxRssi !== undefined
-        ? latestInfo.rxSnr === 0 && latestInfo.rxRssi === 0
-          ? `<span>Данные:</span><span>Через MQTT</span>`
-          : `<span>SNR:</span><span>${latestInfo.rxSnr} dB</span>
-    <span>RSSI:</span><span>${latestInfo.rxRssi} dBm</span>`
-        : ""
-    }
-    ${
-      latestInfo.hopLimit !== undefined
-        ? `<span>Hop Limit:</span><span>${
-            7 - latestInfo.hopLimit === 0 ? "Direct" : 7 - latestInfo.hopLimit
-          }</span>`
-        : ""
-    }
-    ${
-      latestInfo.gatewayId
-        ? `<span>Gateway:</span><span>${latestInfo.gatewayId}</span>`
-        : ""
-    }
     </div>
-
     </div>
     `;
+
+        // Формируем компактную строку с метриками для информации об узле
+        const nodeMetrics = [];
+        if (latestInfo.rxSnr !== undefined && latestInfo.rxRssi !== undefined) {
+          if (latestInfo.rxSnr === 0 && latestInfo.rxRssi === 0) {
+            // Данные через MQTT - показываем в одной строке с Gateway
+            const mqttLine = `Данные: Через MQTT${
+              latestInfo.gatewayId ? ` | Gateway: ${latestInfo.gatewayId}` : ""
+            }`;
+            nodeInfoHtml += `
+    <div style="font-size: 10px; color: #666; margin: 0; line-height: 1.2;">
+    <div>${mqttLine}</div>
+    </div>
+    `;
+          } else {
+            // Обычные данные - показываем метрики и Gateway на новой строке
+            if (latestInfo.rxSnr !== undefined)
+              nodeMetrics.push(`SNR: ${latestInfo.rxSnr} dB`);
+            if (latestInfo.rxRssi !== undefined)
+              nodeMetrics.push(`RSSI: ${latestInfo.rxRssi} dBm`);
+            if (latestInfo.hopLimit !== undefined) {
+              const hops =
+                7 - latestInfo.hopLimit === 0
+                  ? "Direct"
+                  : 7 - latestInfo.hopLimit;
+              nodeMetrics.push(`Hops: ${hops}`);
+            }
+
+            if (nodeMetrics.length > 0) {
+              nodeInfoHtml += `
+    <div style="font-size: 10px; color: #666; margin: 0; line-height: 1.2;">
+    <div>${nodeMetrics.join(" | ")}</div>
+    ${
+      latestInfo.gatewayId
+        ? `<div style="margin-top: 1px;">Gateway: ${latestInfo.gatewayId}</div>`
+        : ""
+    }
+    </div>
+    `;
+            }
+          }
+        }
       }
     }
   } catch (error) {
@@ -217,47 +239,70 @@ const createBalloonContent = async (device, nodeId) => {
     ${
       latestPosition.rawData.latitude_i !== undefined
         ? `<span>Координаты:</span><span>${(
-            latestPosition.rawData.latitude_i / 10000000
-          ).toFixed(5)}, ${(
-            latestPosition.rawData.longitude_i / 10000000
-          ).toFixed(5)}</span>`
-        : ""
-    }
-    ${
-      latestPosition.rawData.altitude !== undefined
-        ? `<span>Высота:</span><span>${latestPosition.rawData.altitude} м</span>`
-        : ""
-    }
-    ${
-      latestPosition.rawData.sats_in_view !== undefined
-        ? `<span>Спутники:</span><span>${latestPosition.rawData.sats_in_view}</span>`
-        : ""
-    }
-    ${
-      latestPosition.rxSnr !== undefined && latestPosition.rxRssi !== undefined
-        ? latestPosition.rxSnr === 0 && latestPosition.rxRssi === 0
-          ? `<span>Данные:</span><span>Через MQTT</span>`
-          : `<span>SNR:</span><span>${latestPosition.rxSnr} dB</span>
-    <span>RSSI:</span><span>${latestPosition.rxRssi} dBm</span>`
-        : ""
-    }
-    ${
-      latestPosition.hopLimit !== undefined
-        ? `<span>Hop Limit:</span><span>${
-            7 - latestPosition.hopLimit === 0
-              ? "Direct"
-              : 7 - latestPosition.hopLimit
+            latestPosition.rawData.latitude_i / 10000
+          ).toFixed(4)}, ${(latestPosition.rawData.longitude_i / 10000).toFixed(
+            4
+          )}${
+            latestPosition.rawData.altitude !== undefined
+              ? `, ${latestPosition.rawData.altitude}м`
+              : ""
+          }${
+            latestPosition.rawData.sats_in_view !== undefined
+              ? `, ${latestPosition.rawData.sats_in_view}Sat`
+              : ""
           }</span>`
-        : ""
-    }
-    ${
-      latestPosition.gatewayId
-        ? `<span>Gateway:</span><span>${latestPosition.gatewayId}</span>`
         : ""
     }
     </div>
     </div>
     `;
+
+      // Формируем компактную строку с метриками для данных о позиции
+      if (
+        latestPosition.rxSnr !== undefined &&
+        latestPosition.rxRssi !== undefined
+      ) {
+        if (latestPosition.rxSnr === 0 && latestPosition.rxRssi === 0) {
+          // Данные через MQTT - показываем в одной строке с Gateway
+          const mqttLine = `Данные: Через MQTT${
+            latestPosition.gatewayId
+              ? ` | Gateway: ${latestPosition.gatewayId}`
+              : ""
+          }`;
+          positionInfoHtml += `
+    <div style="font-size: 10px; color: #666; margin: 0; line-height: 1.2;">
+    <div>${mqttLine}</div>
+    </div>
+    `;
+        } else {
+          // Обычные данные - показываем метрики и Gateway на новой строке
+          const positionMetrics = [];
+          if (latestPosition.rxSnr !== undefined)
+            positionMetrics.push(`SNR: ${latestPosition.rxSnr} dB`);
+          if (latestPosition.rxRssi !== undefined)
+            positionMetrics.push(`RSSI: ${latestPosition.rxRssi} dBm`);
+          if (latestPosition.hopLimit !== undefined) {
+            const hops =
+              7 - latestPosition.hopLimit === 0
+                ? "Direct"
+                : 7 - latestPosition.hopLimit;
+            positionMetrics.push(`Hops: ${hops}`);
+          }
+
+          if (positionMetrics.length > 0) {
+            positionInfoHtml += `
+    <div style="font-size: 10px; color: #666; margin: 0; line-height: 1.2;">
+    <div>${positionMetrics.join(" | ")}</div>
+    ${
+      latestPosition.gatewayId
+        ? `<div style="margin-top: 1px;">Gateway: ${latestPosition.gatewayId}</div>`
+        : ""
+    }
+    </div>
+    `;
+          }
+        }
+      }
     }
   } catch (error) {
     console.error("Ошибка загрузки информации о позиции:", error);
@@ -303,19 +348,19 @@ const createBalloonContent = async (device, nodeId) => {
       if (latestDeviceMetrics && deviceMetricsData) {
         deviceMetricsHtml = `
     <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid #eee;">
-    <div style="font-weight: bold; margin-bottom: 2px;">Данные узла: ${formatTime(
+    <div style="font-weight: bold; margin-bottom: 2px;">Телеметрия узла: ${formatTime(
       latestDeviceMetrics.timestamp
     )}</div>
 
     <div style="display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; font-size: 11px; line-height: 1.2;">
-         ${
-           deviceMetricsData.battery_level !== undefined
-             ? `<span>Батарея:</span><span>${Math.min(
-                 deviceMetricsData.battery_level,
-                 100
-               )}%</span>`
-             : ""
-         }
+    ${
+      deviceMetricsData.battery_level !== undefined
+        ? `<span>Батарея:</span><span>${Math.min(
+            deviceMetricsData.battery_level,
+            100
+          )}%</span>`
+        : ""
+    }
     ${
       deviceMetricsData.voltage !== undefined
         ? `<span>Напряжение:</span><span>${deviceMetricsData.voltage.toFixed(
@@ -346,32 +391,59 @@ const createBalloonContent = async (device, nodeId) => {
           )}м</span>`
         : ""
     }
-    ${
-      latestDeviceMetrics.rxSnr !== undefined &&
-      latestDeviceMetrics.rxRssi !== undefined
-        ? latestDeviceMetrics.rxSnr === 0 && latestDeviceMetrics.rxRssi === 0
-          ? `<span>Данные:</span><span>Через MQTT</span>`
-          : `<span>SNR:</span><span>${latestDeviceMetrics.rxSnr} dB</span>
-    <span>RSSI:</span><span>${latestDeviceMetrics.rxRssi} dBm</span>`
-        : ""
-    }
-    ${
-      latestDeviceMetrics.hopLimit !== undefined
-        ? `<span>Hop Limit:</span><span>${
-            7 - latestDeviceMetrics.hopLimit === 0
-              ? "Direct"
-              : 7 - latestDeviceMetrics.hopLimit
-          }</span>`
-        : ""
-    }
-    ${
-      latestDeviceMetrics.gatewayId
-        ? `<span>Gateway:</span><span>${latestDeviceMetrics.gatewayId}</span>`
-        : ""
-    }
     </div>
     </div>
     `;
+
+        // Формируем компактную строку с метриками для телеметрии узла
+        if (
+          latestDeviceMetrics.rxSnr !== undefined &&
+          latestDeviceMetrics.rxRssi !== undefined
+        ) {
+          if (
+            latestDeviceMetrics.rxSnr === 0 &&
+            latestDeviceMetrics.rxRssi === 0
+          ) {
+            // Данные через MQTT - показываем в одной строке с Gateway
+            const mqttLine = `Данные: Через MQTT${
+              latestDeviceMetrics.gatewayId
+                ? ` | Gateway: ${latestDeviceMetrics.gatewayId}`
+                : ""
+            }`;
+            deviceMetricsHtml += `
+    <div style="font-size: 10px; color: #666; margin: 0; line-height: 1.2;">
+    <div>${mqttLine}</div>
+    </div>
+    `;
+          } else {
+            // Обычные данные - показываем метрики и Gateway на новой строке
+            const deviceMetrics = [];
+            if (latestDeviceMetrics.rxSnr !== undefined)
+              deviceMetrics.push(`SNR: ${latestDeviceMetrics.rxSnr} dB`);
+            if (latestDeviceMetrics.rxRssi !== undefined)
+              deviceMetrics.push(`RSSI: ${latestDeviceMetrics.rxRssi} dBm`);
+            if (latestDeviceMetrics.hopLimit !== undefined) {
+              const hops =
+                7 - latestDeviceMetrics.hopLimit === 0
+                  ? "Direct"
+                  : 7 - latestDeviceMetrics.hopLimit;
+              deviceMetrics.push(`Hops: ${hops}`);
+            }
+
+            if (deviceMetrics.length > 0) {
+              deviceMetricsHtml += `
+    <div style="font-size: 10px; color: #666; margin: 0; line-height: 1.2;">
+    <div>${deviceMetrics.join(" | ")}</div>
+    ${
+      latestDeviceMetrics.gatewayId
+        ? `<div style="margin-top: 1px;">Gateway: ${latestDeviceMetrics.gatewayId}</div>`
+        : ""
+    }
+    </div>
+    `;
+            }
+          }
+        }
       }
 
       // Формируем HTML для сенсоров (environmentMetrics)
@@ -410,33 +482,59 @@ const createBalloonContent = async (device, nodeId) => {
           )} hPa</span>`
         : ""
     }
-    ${
-      latestEnvironmentMetrics.rxSnr !== undefined &&
-      latestEnvironmentMetrics.rxRssi !== undefined
-        ? latestEnvironmentMetrics.rxSnr === 0 &&
-          latestEnvironmentMetrics.rxRssi === 0
-          ? `<span>Данные:</span><span>Через MQTT</span>`
-          : `<span>SNR:</span><span>${latestEnvironmentMetrics.rxSnr} dB</span>
-    <span>RSSI:</span><span>${latestEnvironmentMetrics.rxRssi} dBm</span>`
-        : ""
-    }
-    ${
-      latestEnvironmentMetrics.hopLimit !== undefined
-        ? `<span>Hop Limit:</span><span>${
-            7 - latestEnvironmentMetrics.hopLimit === 0
-              ? "Direct"
-              : 7 - latestEnvironmentMetrics.hopLimit
-          }</span>`
-        : ""
-    }
-    ${
-      latestEnvironmentMetrics.gatewayId
-        ? `<span>Gateway:</span><span>${latestEnvironmentMetrics.gatewayId}</span>`
-        : ""
-    }
     </div>
     </div>
     `;
+
+        // Формируем компактную строку с метриками для сенсоров
+        if (
+          latestEnvironmentMetrics.rxSnr !== undefined &&
+          latestEnvironmentMetrics.rxRssi !== undefined
+        ) {
+          if (
+            latestEnvironmentMetrics.rxSnr === 0 &&
+            latestEnvironmentMetrics.rxRssi === 0
+          ) {
+            // Данные через MQTT - показываем в одной строке с Gateway
+            const mqttLine = `Данные: Через MQTT${
+              latestEnvironmentMetrics.gatewayId
+                ? ` | Gateway: ${latestEnvironmentMetrics.gatewayId}`
+                : ""
+            }`;
+            environmentMetricsHtml += `
+    <div style="font-size: 10px; color: #666; margin: 0; line-height: 1.2;">
+    <div>${mqttLine}</div>
+    </div>
+    `;
+          } else {
+            // Обычные данные - показываем метрики и Gateway на новой строке
+            const envMetrics = [];
+            if (latestEnvironmentMetrics.rxSnr !== undefined)
+              envMetrics.push(`SNR: ${latestEnvironmentMetrics.rxSnr} dB`);
+            if (latestEnvironmentMetrics.rxRssi !== undefined)
+              envMetrics.push(`RSSI: ${latestEnvironmentMetrics.rxRssi} dBm`);
+            if (latestEnvironmentMetrics.hopLimit !== undefined) {
+              const hops =
+                7 - latestEnvironmentMetrics.hopLimit === 0
+                  ? "Direct"
+                  : 7 - latestEnvironmentMetrics.hopLimit;
+              envMetrics.push(`Hops: ${hops}`);
+            }
+
+            if (envMetrics.length > 0) {
+              environmentMetricsHtml += `
+    <div style="font-size: 10px; color: #666; margin: 0; line-height: 1.2;">
+    <div>${envMetrics.join(" | ")}</div>
+    ${
+      latestEnvironmentMetrics.gatewayId
+        ? `<div style="margin-top: 1px;">Gateway: ${latestEnvironmentMetrics.gatewayId}</div>`
+        : ""
+    }
+    </div>
+    `;
+            }
+          }
+        }
       }
 
       telemetryInfoHtml = deviceMetricsHtml + environmentMetricsHtml;
@@ -471,31 +569,56 @@ const createBalloonContent = async (device, nodeId) => {
           }</span>`
         : ""
     }
-    ${
-      latestMessage.rxSnr !== undefined && latestMessage.rxRssi !== undefined
-        ? latestMessage.rxSnr === 0 && latestMessage.rxRssi === 0
-          ? `<span>Данные:</span><span>Через MQTT</span>`
-          : `<span>SNR:</span><span>${latestMessage.rxSnr} dB</span>
-    <span>RSSI:</span><span>${latestMessage.rxRssi} dBm</span>`
-        : ""
-    }
-    ${
-      latestMessage.hopLimit !== undefined
-        ? `<span>Hop Limit:</span><span>${
-            7 - latestMessage.hopLimit === 0
-              ? "Direct"
-              : 7 - latestMessage.hopLimit
-          }</span>`
-        : ""
-    }
-    ${
-      latestMessage.gatewayId
-        ? `<span>Gateway:</span><span>${latestMessage.gatewayId}</span>`
-        : ""
-    }
     </div>
     </div>
     `;
+
+        // Формируем компактную строку с метриками для текстового сообщения
+        if (
+          latestMessage.rxSnr !== undefined &&
+          latestMessage.rxRssi !== undefined
+        ) {
+          if (latestMessage.rxSnr === 0 && latestMessage.rxRssi === 0) {
+            // Данные через MQTT - показываем в одной строке с Gateway
+            const mqttLine = `Данные: Через MQTT${
+              latestMessage.gatewayId
+                ? ` | Gateway: ${latestMessage.gatewayId}`
+                : ""
+            }`;
+            textMessagesHtml += `
+    <div style="font-size: 10px; color: #666; margin: 0; line-height: 1.2;">
+    <div>${mqttLine}</div>
+    </div>
+    `;
+          } else {
+            // Обычные данные - показываем метрики и Gateway на новой строке
+            const messageMetrics = [];
+            if (latestMessage.rxSnr !== undefined)
+              messageMetrics.push(`SNR: ${latestMessage.rxSnr} dB`);
+            if (latestMessage.rxRssi !== undefined)
+              messageMetrics.push(`RSSI: ${latestMessage.rxRssi} dBm`);
+            if (latestMessage.hopLimit !== undefined) {
+              const hops =
+                7 - latestMessage.hopLimit === 0
+                  ? "Direct"
+                  : 7 - latestMessage.hopLimit;
+              messageMetrics.push(`Hops: ${hops}`);
+            }
+
+            if (messageMetrics.length > 0) {
+              textMessagesHtml += `
+    <div style="font-size: 10px; color: #666; margin: 0; line-height: 1.2;">
+    <div>${messageMetrics.join(" | ")}</div>
+    ${
+      latestMessage.gatewayId
+        ? `<div style="margin-top: 1px;">Gateway: ${latestMessage.gatewayId}</div>`
+        : ""
+    }
+    </div>
+    `;
+            }
+          }
+        }
       }
     }
   } catch (error) {
@@ -534,13 +657,13 @@ const createBalloonContent = async (device, nodeId) => {
         ? `<span>Прошивка:</span><span>${rawData.decoded.firmware_version}</span>`
         : ""
     }
-         ${
-           rawData.decoded.region !== undefined
-             ? `<span>Регион:</span><span>${
-                 REGIONS[rawData.decoded.region] || rawData.decoded.region
-               }</span>`
-             : ""
-         }
+    ${
+      rawData.decoded.region !== undefined
+        ? `<span>Регион:</span><span>${
+            REGIONS[rawData.decoded.region] || rawData.decoded.region
+          }</span>`
+        : ""
+    }
     ${
       rawData.decoded.modem_preset !== undefined
         ? `<span>Пресет модема:</span><span>${rawData.decoded.modem_preset}</span>`
@@ -553,23 +676,150 @@ const createBalloonContent = async (device, nodeId) => {
           }</span>`
         : ""
     }
-        ${
-          rawData.decoded.numOnlineLocalNodes !== undefined
-            ? `<span>Рядом других устройств:</span><span>${rawData.decoded.numOnlineLocalNodes}</span>`
-            : ""
-        }
     ${
-      latestReport.rxSnr !== undefined && latestReport.rxRssi !== undefined
-        ? latestReport.rxSnr === 0 && latestReport.rxRssi === 0
-          ? `<span>Данные:</span><span>Через MQTT</span>`
-          : `<span>SNR:</span><span>${latestReport.rxSnr} dB</span>
-    <span>RSSI:</span><span>${latestReport.rxRssi} dBm</span>`
+      rawData.decoded.numOnlineLocalNodes !== undefined
+        ? `<span>Рядом других устройств:</span><span>${rawData.decoded.numOnlineLocalNodes}</span>`
         : ""
     }
+    </div>
+    </div>
+    `;
 
+        // Формируем компактную строку с метриками для отчета карты
+        if (
+          latestReport.rxSnr !== undefined &&
+          latestReport.rxRssi !== undefined
+        ) {
+          if (latestReport.rxSnr === 0 && latestReport.rxRssi === 0) {
+            // Данные через MQTT - показываем в одной строке с Gateway
+            const mqttLine = `Данные: Через MQTT${
+              latestReport.gatewayId
+                ? ` | Gateway: ${latestReport.gatewayId}`
+                : ""
+            }`;
+            mapReportHtml += `
+    <div style="font-size: 10px; color: #666; margin: 0; line-height: 1.2;">
+    <div>${mqttLine}</div>
+    </div>
+    `;
+          } else {
+            // Обычные данные - показываем метрики и Gateway на новой строке
+            const reportMetrics = [];
+            if (latestReport.rxSnr !== undefined)
+              reportMetrics.push(`SNR: ${latestReport.rxSnr} dB`);
+            if (latestReport.rxRssi !== undefined)
+              reportMetrics.push(`RSSI: ${latestReport.rxRssi} dBm`);
+            if (latestReport.hopLimit !== undefined)
+              reportMetrics.push(`Hops: ${latestReport.hopLimit}`);
+
+            if (reportMetrics.length > 0) {
+              mapReportHtml += `
+    <div style="font-size: 10px; color: #666; margin: 0; line-height: 1.2;">
+    <div>${reportMetrics.join(" | ")}</div>
     ${
       latestReport.gatewayId
-        ? `<span>Gateway:</span><span>${latestReport.gatewayId}</span>`
+        ? `<div style="margin-top: 1px;">Gateway: ${latestReport.gatewayId}</div>`
+        : ""
+    }
+    </div>
+    `;
+            }
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.error("Ошибка загрузки отчета карты:", error);
+  }
+
+  // Загружаем данные traceroute
+  try {
+    const tracerouteInfo = await meshtasticApi.getTracerouteInfo(nodeId);
+    if (
+      tracerouteInfo &&
+      tracerouteInfo.data &&
+      tracerouteInfo.data.length > 0
+    ) {
+      // Берем последнюю запись (самую свежую)
+      const latestTrace = tracerouteInfo.data[0];
+      const rawData = latestTrace.rawData;
+
+      if (rawData) {
+        // Формируем компактный маршрут с SNR
+        let routeDisplay = "";
+
+        if (rawData.route && rawData.route.length > 0) {
+          // Создаем маршрут с SNR для каждого хопа
+          const routeParts = [];
+
+          // Добавляем источник
+          routeParts.push(`!${latestTrace.from.toString(16)}`);
+
+          // Добавляем промежуточные узлы с SNR
+          for (let i = 0; i < rawData.route.length; i++) {
+            const nodeHex = `!${rawData.route[i].toString(16)}`;
+            const snr =
+              rawData.snr_towards && rawData.snr_towards[i]
+                ? `(${rawData.snr_towards[i]}dB)`
+                : "";
+            routeParts.push(`${nodeHex}${snr}`);
+          }
+
+          // Добавляем назначение
+          routeParts.push(`!${latestTrace.to.toString(16)}`);
+
+          routeDisplay = routeParts.join(" → ");
+        }
+
+        // Формируем обратный маршрут если есть
+        let backRouteDisplay = "";
+        if (rawData.route_back && rawData.route_back.length > 0) {
+          const backParts = [];
+          for (let i = 0; i < rawData.route_back.length; i++) {
+            const nodeHex = `!${rawData.route_back[i].toString(16)}`;
+            const snr =
+              rawData.snr_back && rawData.snr_back[i]
+                ? `(${rawData.snr_back[i]}dB)`
+                : "";
+            backParts.push(`${nodeHex}${snr}`);
+          }
+          backRouteDisplay = backParts.join(" → ");
+        } else {
+          backRouteDisplay = "нет маршрута";
+        }
+
+        // Формируем компактную строку с метриками
+        const metrics = [];
+        if (latestTrace.rxSnr !== undefined)
+          metrics.push(`SNR: ${latestTrace.rxSnr} dB`);
+        if (latestTrace.rxRssi !== undefined)
+          metrics.push(`RSSI: ${latestTrace.rxRssi} dBm`);
+        if (latestTrace.hopLimit !== undefined)
+          metrics.push(`Hops: ${latestTrace.hopLimit}`);
+        const metricsLine = metrics.join(" | ");
+
+        tracerouteHtml = `
+    <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid #eee;">
+    <div style="font-weight: bold; margin-bottom: 2px;">Traceroute: ${formatTime(
+      latestTrace.timestamp
+    )}</div>
+    <div style="font-size: 11px; line-height: 1.3;">
+    ${
+      routeDisplay
+        ? `<div style="margin-bottom: 2px; word-break: break-all;">${routeDisplay}</div>`
+        : ""
+    }
+    ${
+      backRouteDisplay !== "нет маршрута"
+        ? `<div style="margin-bottom: 2px; color: #666;">Обратно: ${backRouteDisplay}</div>`
+        : `<div style="margin-bottom: 2px; color: #666;">Обратно: ${backRouteDisplay}</div>`
+    }
+    ${
+      metricsLine ? `<div style="margin-bottom: 2px;">${metricsLine}</div>` : ""
+    }
+    ${
+      latestTrace.gatewayId
+        ? `<div style="margin-bottom: 2px;">Gateway: ${latestTrace.gatewayId}</div>`
         : ""
     }
     </div>
@@ -578,7 +828,7 @@ const createBalloonContent = async (device, nodeId) => {
       }
     }
   } catch (error) {
-    console.error("Ошибка загрузки отчета карты:", error);
+    console.error("Ошибка загрузки данных traceroute:", error);
   }
 
   return `
@@ -589,6 +839,7 @@ const createBalloonContent = async (device, nodeId) => {
     ${telemetryInfoHtml}
     ${textMessagesHtml}
     ${mapReportHtml}
+    ${tracerouteHtml}
     </div>
   `;
 };
@@ -817,8 +1068,8 @@ onMounted(async () => {
     stopDataUpdates();
   });
 
-  const renderSelfBallon = (shouldSetCenter) => {
-    if (!shouldSetCenter) return;
+  const renderSelfBallon = (shouldSetCenter = false) => {
+    console.log("Запрос геолокации, shouldSetCenter:", shouldSetCenter);
 
     ymaps.geolocation
       .get({
@@ -828,6 +1079,7 @@ onMounted(async () => {
       })
       .then(function (result) {
         try {
+          console.log("Геолокация получена успешно");
           result.geoObjects.options.set("preset", MAP_PRESETS.GEOLOCATION);
           result.geoObjects
             .get(0)
@@ -835,18 +1087,19 @@ onMounted(async () => {
           map.geoObjects.add(result.geoObjects);
 
           if (shouldSetCenter) {
-            map.setCenter(
-              result.geoObjects.get(0).geometry.getCoordinates(),
-              10
-            );
+            const coords = result.geoObjects.get(0).geometry.getCoordinates();
+            console.log("Центрирование карты на координатах:", coords);
+            map.setCenter(coords, MAP_CONFIG.DEFAULT_ZOOM + 1);
           }
         } catch (error) {
+          console.error("Ошибка обработки геолокации:", error);
           if (shouldSetCenter) {
             map.setCenter(MAP_CONFIG.DEFAULT_CENTER, MAP_CONFIG.DEFAULT_ZOOM);
           }
         }
       })
       .catch(function (error) {
+        console.error("Ошибка получения геолокации:", error);
         if (shouldSetCenter) {
           map.setCenter(MAP_CONFIG.DEFAULT_CENTER, MAP_CONFIG.DEFAULT_ZOOM);
         }
@@ -898,7 +1151,7 @@ onMounted(async () => {
       map.geoObjects?.removeAll();
       pointsOnMap.value = 0;
       filteredDevicesCache.value.clear();
-      renderSelfBallon();
+      renderSelfBallon(false);
       debouncedRenderBallons(newDevices);
       renderPath(openedNodeId);
     });

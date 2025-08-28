@@ -308,11 +308,14 @@ const createBalloonContent = async (device, nodeId) => {
     )}</div>
 
     <div style="display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; font-size: 11px; line-height: 1.2;">
-    ${
-      deviceMetricsData.battery_level !== undefined
-        ? `<span>Батарея:</span><span>${deviceMetricsData.battery_level}%</span>`
-        : ""
-    }
+         ${
+           deviceMetricsData.battery_level !== undefined
+             ? `<span>Батарея:</span><span>${Math.min(
+                 deviceMetricsData.battery_level,
+                 100
+               )}%</span>`
+             : ""
+         }
     ${
       deviceMetricsData.voltage !== undefined
         ? `<span>Напряжение:</span><span>${deviceMetricsData.voltage.toFixed(
